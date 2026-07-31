@@ -2,7 +2,6 @@
 Scope: Core cJSON.c/cJSON.h is the committed scope for this submission. Test Parity is measured against tests/original/ (20 files, hashed in tests-kickoff.sha256). cJSON_Utils is an explicit stretch goal. Its tests are preserved unmodified under tests/original-utils/ (hashed separately in tests-kickoff-utils.sha256) so they're ready to use if time permits, but they are not part of the core deliverable and won't be counted against us if untouched.
 
 # 2. Core Data Structure: Arena/Index-Based Tree (not raw pointers)
-
 Decision: The Rust port's internal tree representation uses an arena
 (a single Vec<Node>, indexed by NodeId) instead of C-style raw pointers
 for next/prev/child links.
@@ -43,3 +42,6 @@ otherwise.
 Impact: blocks/shapes Member 1 (parser) and Member 2 (data model,
 tree mutation, printer) — both build against `NodeId`/`Arena` from the
 start. Communicated to the team before either began implementation.
+
+# 3. 
+Arena::get and get_mut return references and use direct index access, so invalid NodeId values panic consistently with Vec indexing. This keeps the locked API minimal and exposes invalid internal IDs during development rather than silently converting a structural error into an absent node. Added Default as a Clippy-compatible equivalent of Arena::new(); it does not alter the locked representation or behavior.
