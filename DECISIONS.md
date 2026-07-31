@@ -1,0 +1,2 @@
+# 1. Scope Decision before start
+Scope: Core cJSON.c/cJSON.h is the committed scope for this submission. Test Parity is measured against tests/original/ (20 files, hashed in tests-kickoff.sha256). cJSON_Utils is an explicit stretch goal. Its tests are preserved unmodified under tests/original-utils/ (hashed separately in tests-kickoff-utils.sha256) so they're ready to use if time permits, but they are not part of the core deliverable and won't be counted against us if untouched.
