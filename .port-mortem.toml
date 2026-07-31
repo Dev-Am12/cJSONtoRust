@@ -1,0 +1,5 @@
+track = "A"
+source_repo = "https://github.com/DaveGamble/cJSON"
+source_version = "1.7.19"
+kickoff_hash_core = "tests-kickoff.sha256"
+kickoff_hash_utils = "tests-kickoff-utils.sha256"
