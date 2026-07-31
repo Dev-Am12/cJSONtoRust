@@ -104,4 +104,33 @@ impl Arena {
     pub fn create_raw(&mut self, value: Vec<u8>) -> NodeId {
         self.alloc_simple(NodeType::Raw, Some(value), 0.0)
     }
+
+    pub fn create_array(&mut self) -> NodeId {
+        self.alloc_simple(NodeType::Array, None, 0.0)
+    }
+
+    pub fn create_object(&mut self) -> NodeId {
+        self.alloc_simple(NodeType::Object, None, 0.0)
+    }
+
+    pub fn append_child(&mut self, parent: NodeId, child: NodeId, key: Option<Vec<u8>>) {
+        assert_ne!(parent, child, "a node cannot be its own child");
+
+        self.get_mut(child).next = None;
+        self.get_mut(child).prev = None;
+        self.get_mut(child).key = key;
+
+        let first_child = self.get(parent).child;
+        match first_child {
+            None => self.get_mut(parent).child = Some(child),
+            Some(mut last_child) => {
+                while let Some(next) = self.get(last_child).next {
+                    last_child = next;
+                }
+
+                self.get_mut(last_child).next = Some(child);
+                self.get_mut(child).prev = Some(last_child);
+            }
+        }
+    }
 }

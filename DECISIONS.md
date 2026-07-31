@@ -45,3 +45,6 @@ start. Communicated to the team before either began implementation.
 
 # 3. 
 Arena::get and get_mut return references and use direct index access, so invalid NodeId values panic consistently with Vec indexing. This keeps the locked API minimal and exposes invalid internal IDs during development rather than silently converting a structural error into an absent node. Added Default as a Clippy-compatible equivalent of Arena::new(); it does not alter the locked representation or behavior.
+
+# 4. Tradeoff for cJSON 0(1) "find the tail to append" optimisation
+The arena append primitive walks the null-terminated sibling list to find its tail, rather than reproducing cJSON’s optimization of storing the tail in the first child’s prev field. This preserves the conventional invariant that each node’s prev is its immediate preceding sibling (and the first child has no predecessor), making bidirectional traversal direct and unambiguous with NodeId links. The trade-off is O(n) append time; adding a tail field would change the locked Node/Arena representation.
