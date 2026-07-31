@@ -4,6 +4,12 @@
 
 The hackathon this project is for exists specifically because an AI-assisted rewrite (Bun's Zig→Rust migration) shipped 13,044 unsafe blocks and had its test suite quietly edited to go green. Every rule below traces back to preventing a specific version of that failure. Read the rationale, not just the rule — you'll need to explain these decisions to a human judge.
 
+## Repository structure — read this first
+
+- `/cJSON` — the original C repository. **Read-only reference material.** Never edit, never "fix," never treat as a place to leave scratch files. If you need to understand original behavior, read it; if you need to run it, that's Member 3's build, not something to modify here.
+- `/rJSON` — the port. **This is the only place port code gets written.**
+- `/rJSON/tests/original/` and `/rJSON/tests/original-utils/` — frozen, hashed copies of the original test suite. **Never edit these either**, for the same reason as `/cJSON` — they're the fixed comparison point the whole project is scored against.
+- If a task seems to require editing anything under `/cJSON` or `tests/original*`, stop — that almost certainly means the task is being misunderstood, not that an edit is actually needed.
 ---
 
 ## 0. The prime directive
