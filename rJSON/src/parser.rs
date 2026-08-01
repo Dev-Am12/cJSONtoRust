@@ -1,22 +1,23 @@
 //! Recursive-descent parser state and value dispatcher.
 //!
 //! This module is the Rust equivalent of the `parse_buffer` handling in
-//! upstream `cJSON.c` (`parse_value`, `parse_number`, the literal branches
-//! of `parse_value`, `buffer_skip_whitespace`, and the `can_read` /
-//! `can_access_at_index` macros). It intentionally does **not** implement
-//! string, array, or object parsing -- see `DECISIONS_personal.md` for the
-//! member-ownership split.
+//! upstream `cJSON.c` (`parse_value`, `parse_number`, `parse_string`,
+//! `parse_array`, `parse_object`, the literal branches of `parse_value`,
+//! `buffer_skip_whitespace`, and the `can_read` / `can_access_at_index`
+//! macros). It intentionally does **not** implement the top-level
+//! `cJSON_Parse`/`cJSON_ParseWithOpts` entry point (including UTF-8 BOM
+//! skipping) -- see `DECISIONS_personal.md` for the member-ownership
+//! split.
 //!
 //! Behavioral parity with upstream cJSON takes priority over idiomatic
 //! Rust throughout this file, per `AI_GUARDRAILS.md` §3.
 
 use crate::arena::{Arena, NodeId};
 
-/// Mirrors `cJSON.h`'s `CJSON_NESTING_LIMIT` (default build value). Not
-/// enforced by anything in this file yet -- `depth` exists on `Parser`
-/// now so the array/object member doesn't need to change this struct's
-/// layout later, but the limit check itself belongs with `parse_array`/
-/// `parse_object`, which are out of scope here.
+/// Mirrors `cJSON.h`'s `CJSON_NESTING_LIMIT` (default build value).
+/// Enforced by `parse_array`/`parse_object`, exactly as upstream's
+/// `input_buffer->depth >= CJSON_NESTING_LIMIT` check at the top of each
+/// function (`cJSON.c` lines ~1502 and ~1667).
 pub const CJSON_NESTING_LIMIT: usize = 1000;
 
 /// A failed parse. Upstream cJSON reports failure as a `cJSON_bool`
@@ -60,8 +61,8 @@ impl<'a> Parser<'a> {
     }
 
     /// The current nesting depth. Equivalent to reading
-    /// `parse_buffer.depth` directly. Unused until array/object parsing
-    /// is implemented.
+    /// `parse_buffer.depth` directly. Incremented/decremented by
+    /// `parse_array`/`parse_object` around each array/object body.
     pub fn depth(&self) -> usize {
         self.depth
     }
@@ -126,11 +127,8 @@ impl<'a> Parser<'a> {
     /// Recursive-descent value dispatcher. Equivalent to `parse_value`.
     ///
     /// Tries literals in exactly the order upstream does (`null`,
-    /// `false`, `true`), then numbers. String/array/object dispatch is
-    /// intentionally not implemented here (see module docs); reaching
-    /// one of those leading bytes (`"`, `[`, `{`) falls through to the
-    /// same `Err(ParseError)` as any other unrecognized input, exactly
-    /// as it would in upstream cJSON if those branches didn't exist.
+    /// `false`, `true`), then string, then number, then array, then
+    /// object -- the exact dispatch order of upstream's `parse_value`.
     ///
     /// Note this replicates a real upstream quirk on purpose: the literal
     /// matches are a fixed-length byte comparison with no word-boundary
@@ -168,6 +166,14 @@ impl<'a> Parser<'a> {
             if c == b'-' || c.is_ascii_digit() {
                 return self.parse_number();
             }
+        }
+
+        if self.can_access_at_index(0) && self.byte_at(0) == b'[' {
+            return self.parse_array();
+        }
+
+        if self.can_access_at_index(0) && self.byte_at(0) == b'{' {
+            return self.parse_object();
         }
 
         Err(ParseError)
@@ -462,6 +468,313 @@ impl<'a> Parser<'a> {
         let id = self.arena.create_number(value);
         self.current_offset = start + consumed;
         Ok(id)
+    }
+
+    /// O(1) sibling-list append used while parsing array/object elements.
+    ///
+    /// `Arena::append_child` (per `DECISIONS.md` #4) walks the sibling
+    /// chain to find the current tail on every call -- fine for one-off
+    /// public-API insertions, but it would make parsing an N-element
+    /// array/object O(n^2). While parsing, the tail is already known (the
+    /// item most recently parsed), so linking it directly is a single
+    /// pair of field writes: `tail.next = item`, `item.prev = tail`. This
+    /// keeps the conventional "prev = true predecessor" invariant intact
+    /// (same as `append_child`) and does not introduce any new
+    /// collection -- just plain `NodeId` links on `Node`, per this task's
+    /// constraint to preserve O(1) sibling insertion without `Vec<NodeId>`
+    /// or a `HashMap`.
+    fn link_as_next_sibling(&mut self, tail: NodeId, item: NodeId) {
+        self.arena.get_mut(tail).next = Some(item);
+        self.arena.get_mut(item).prev = Some(tail);
+    }
+
+    /// Equivalent to `parse_array`.
+    ///
+    /// Enforces `CJSON_NESTING_LIMIT` exactly as upstream does: the depth
+    /// check happens *before* confirming the current byte is even `[`,
+    /// matching `cJSON.c`'s literal statement order (this is only ever
+    /// observable if `parse_array` were called on non-`[` input directly,
+    /// which never happens through `parse_value`'s dispatch, since it
+    /// only calls this after already checking `byte_at(0) == '['`).
+    ///
+    /// Children are parsed one at a time through `parse_value` and linked
+    /// with `link_as_next_sibling` as each one completes -- O(1) per
+    /// element, not upstream's O(1)-via-tail-shortcut trick (rejected in
+    /// `DECISIONS.md` #4) and not `Arena::append_child`'s O(n) walk
+    /// either.
+    ///
+    /// **Depth accounting divergence (flagged per `AI_GUARDRAILS.md`
+    /// §3.2):** upstream only executes `input_buffer->depth--;` on the
+    /// success path -- every `goto fail;` in the C function skips it,
+    /// leaving `depth` incremented on failure. This is invisible in C
+    /// because a failed parse aborts the *entire* `cJSON_Parse` call
+    /// immediately (every enclosing `parse_array`/`parse_object` also
+    /// hits its own `goto fail` and returns, all the way to the top, with
+    /// no further use of `depth` afterward). This port's `Parser` can
+    /// outlive a failed `parse_value()` call (e.g. `depth()` is a public
+    /// accessor), so this implementation decrements `depth` on *every*
+    /// exit path, success or failure, keeping the increment/decrement
+    /// balanced. This cannot change observable parse results (nothing
+    /// reads `depth` again after a failure within the same top-level
+    /// parse, in either implementation) and avoids leaving `Parser` in a
+    /// misleading state if inspected or reused after an error.
+    ///
+    /// On failure after one or more elements were already linked, the
+    /// partially-built sibling chain is torn down with a single
+    /// `Arena::delete(head)` call, matching `cJSON_Delete(head)` in
+    /// upstream's `fail:` label (which walks the whole `next` chain from
+    /// `head`, per `DECISIONS.md` #6).
+    fn parse_array(&mut self) -> Result<NodeId, ParseError> {
+        if self.depth >= CJSON_NESTING_LIMIT {
+            // too deeply nested
+            return Err(ParseError);
+        }
+        self.depth += 1;
+
+        if !self.can_access_at_index(0) || self.byte_at(0) != b'[' {
+            // not an array
+            self.depth -= 1;
+            return Err(ParseError);
+        }
+
+        self.current_offset += 1;
+        self.skip_whitespace();
+        if self.can_access_at_index(0) && self.byte_at(0) == b']' {
+            // empty array
+            self.depth -= 1;
+            let array = self.arena.create_array();
+            self.current_offset += 1;
+            return Ok(array);
+        }
+
+        // check if we skipped to the end of the buffer
+        if !self.can_access_at_index(0) {
+            self.current_offset -= 1;
+            self.depth -= 1;
+            return Err(ParseError);
+        }
+
+        // step back to character in front of the first element
+        self.current_offset -= 1;
+
+        let mut head: Option<NodeId> = None;
+        let mut tail: Option<NodeId> = None;
+
+        // loop through the comma separated array elements
+        loop {
+            self.current_offset += 1;
+            self.skip_whitespace();
+
+            let item = match self.parse_value() {
+                Ok(id) => id,
+                Err(err) => {
+                    // failed to parse value
+                    self.depth -= 1;
+                    if let Some(head) = head {
+                        self.arena.delete(head);
+                    }
+                    return Err(err);
+                }
+            };
+            self.skip_whitespace();
+
+            match tail {
+                None => {
+                    // start the linked list
+                    head = Some(item);
+                    tail = Some(item);
+                }
+                Some(previous_tail) => {
+                    // add to the end and advance
+                    self.link_as_next_sibling(previous_tail, item);
+                    tail = Some(item);
+                }
+            }
+
+            if self.can_access_at_index(0) && self.byte_at(0) == b',' {
+                continue;
+            }
+            break;
+        }
+
+        if !self.can_access_at_index(0) || self.byte_at(0) != b']' {
+            // expected end of array
+            self.depth -= 1;
+            if let Some(head) = head {
+                self.arena.delete(head);
+            }
+            return Err(ParseError);
+        }
+
+        self.depth -= 1;
+
+        let array = self.arena.create_array();
+        if let Some(head) = head {
+            self.arena.get_mut(array).child = Some(head);
+        }
+
+        self.current_offset += 1;
+        Ok(array)
+    }
+
+    /// Equivalent to `parse_object`.
+    ///
+    /// Structurally mirrors `parse_array` (see its doc comment for the
+    /// nesting-limit-order note and the depth-accounting divergence,
+    /// which both apply here identically). The one shape difference from
+    /// `parse_array` is that each element is a *key: value* pair rather
+    /// than a bare value:
+    ///
+    /// - The key is parsed with `parse_string` (the same private method
+    ///   `parse_value` uses for string *values* -- see
+    ///   `DECISIONS_personal.md` #8's follow-up, which flagged exactly
+    ///   this reuse), kept as the raw `Vec<u8>` it already returns rather
+    ///   than being wrapped in a `String` node the way upstream
+    ///   temporarily wraps it in `current_item->valuestring` before the
+    ///   swap into `current_item->string`. There is no swap to perform
+    ///   here: the key never becomes a node's `value_string` in the first
+    ///   place, it goes directly into the eventual value node's `key`
+    ///   field once that node exists.
+    /// - The value is then parsed with `parse_value` (a fresh node,
+    ///   unlike upstream reusing the same `cJSON` struct for both the key
+    ///   and the value), and the key `Vec<u8>` computed above is moved
+    ///   into that node's `key` field.
+    /// - Duplicate keys are never checked for or rejected -- object
+    ///   members are linked in encounter order exactly like array
+    ///   elements, matching upstream (which has no duplicate-key check in
+    ///   `parse_object` either) and this task's explicit requirement to
+    ///   preserve, not reject, duplicates.
+    ///
+    /// Matches upstream's `cannot_access_at_index(input_buffer, 1)`
+    /// "nothing comes after the comma" guard, checked at the same point
+    /// in the loop (before consuming the byte after `{`/`,`, so before
+    /// attempting to parse a key) and using the same offset.
+    fn parse_object(&mut self) -> Result<NodeId, ParseError> {
+        if self.depth >= CJSON_NESTING_LIMIT {
+            // too deeply nested
+            return Err(ParseError);
+        }
+        self.depth += 1;
+
+        if !self.can_access_at_index(0) || self.byte_at(0) != b'{' {
+            // not an object
+            self.depth -= 1;
+            return Err(ParseError);
+        }
+
+        self.current_offset += 1;
+        self.skip_whitespace();
+        if self.can_access_at_index(0) && self.byte_at(0) == b'}' {
+            // empty object
+            self.depth -= 1;
+            let object = self.arena.create_object();
+            self.current_offset += 1;
+            return Ok(object);
+        }
+
+        // check if we skipped to the end of the buffer
+        if !self.can_access_at_index(0) {
+            self.current_offset -= 1;
+            self.depth -= 1;
+            return Err(ParseError);
+        }
+
+        // step back to character in front of the first element
+        self.current_offset -= 1;
+
+        let mut head: Option<NodeId> = None;
+        let mut tail: Option<NodeId> = None;
+
+        // loop through the comma separated object members
+        loop {
+            if !self.can_access_at_index(1) {
+                // nothing comes after the comma
+                self.depth -= 1;
+                if let Some(head) = head {
+                    self.arena.delete(head);
+                }
+                return Err(ParseError);
+            }
+
+            // parse the name of the child
+            self.current_offset += 1;
+            self.skip_whitespace();
+            let key = match self.parse_string() {
+                Some(bytes) => bytes,
+                None => {
+                    // failed to parse name
+                    self.depth -= 1;
+                    if let Some(head) = head {
+                        self.arena.delete(head);
+                    }
+                    return Err(ParseError);
+                }
+            };
+            self.skip_whitespace();
+
+            if !self.can_access_at_index(0) || self.byte_at(0) != b':' {
+                // invalid object
+                self.depth -= 1;
+                if let Some(head) = head {
+                    self.arena.delete(head);
+                }
+                return Err(ParseError);
+            }
+
+            // parse the value
+            self.current_offset += 1;
+            self.skip_whitespace();
+            let item = match self.parse_value() {
+                Ok(id) => id,
+                Err(err) => {
+                    // failed to parse value
+                    self.depth -= 1;
+                    if let Some(head) = head {
+                        self.arena.delete(head);
+                    }
+                    return Err(err);
+                }
+            };
+            self.arena.get_mut(item).key = Some(key);
+            self.skip_whitespace();
+
+            match tail {
+                None => {
+                    // start the linked list
+                    head = Some(item);
+                    tail = Some(item);
+                }
+                Some(previous_tail) => {
+                    // add to the end and advance
+                    self.link_as_next_sibling(previous_tail, item);
+                    tail = Some(item);
+                }
+            }
+
+            if self.can_access_at_index(0) && self.byte_at(0) == b',' {
+                continue;
+            }
+            break;
+        }
+
+        if !self.can_access_at_index(0) || self.byte_at(0) != b'}' {
+            // expected end of object
+            self.depth -= 1;
+            if let Some(head) = head {
+                self.arena.delete(head);
+            }
+            return Err(ParseError);
+        }
+
+        self.depth -= 1;
+
+        let object = self.arena.create_object();
+        if let Some(head) = head {
+            self.arena.get_mut(object).child = Some(head);
+        }
+
+        self.current_offset += 1;
+        Ok(object)
     }
 }
 

@@ -1,15 +1,15 @@
-//! Black-box re-expression of `tests/original/parse_string.c`'s intent
-//! against the public `Parser`/`Arena` API, per `DECISIONS.md` #2 (the
-//! original file's `assert_parse_string`/`assert_not_parse_string`
-//! helpers call the internal, static `parse_string` directly, which has
-//! no equivalent shape in this port -- string parsing here is reached
-//! only through `Parser::parse_value`).
-//!
-//! Every case in this file is drawn from either an original assertion in
-//! `tests/original/parse_string.c` or a specific behavioral requirement
-//! from this task (Unicode escapes, surrogate pairs, raw UTF-8
-//! passthrough for invalid byte sequences). See `rJSON/DECISIONS_personal.md`
-//! for the entry documenting this implementation.
+// Black-box re-expression of `tests/original/parse_string.c`'s intent
+// against the public `Parser`/`Arena` API, per `DECISIONS.md` #2 (the
+// original file's `assert_parse_string`/`assert_not_parse_string`
+// helpers call the internal, static `parse_string` directly, which has
+// no equivalent shape in this port -- string parsing here is reached
+// only through `Parser::parse_value`).
+//
+// Every case in this file is drawn from either an original assertion in
+// `tests/original/parse_string.c` or a specific behavioral requirement
+// from this task (Unicode escapes, surrogate pairs, raw UTF-8
+// passthrough for invalid byte sequences). See `rJSON/DECISIONS_personal.md`
+// for the entry documenting this implementation.
 
 use rjson::{Arena, NodeType, Parser};
 
