@@ -103,6 +103,95 @@ impl Arena {
         id.0 < self.nodes.len() && !self.deleted[id.0]
     }
 
+    pub fn print_number(&self, id: NodeId) -> Option<String> {
+        if !self.is_live_node(id) {
+            return None;
+        }
+
+        let value = self.get(id).value_double;
+        if value.is_nan() || value.is_infinite() {
+            return Some("null".to_string());
+        }
+
+        let integer_value = if value >= i32::MAX as f64 {
+            i32::MAX
+        } else if value <= i32::MIN as f64 {
+            i32::MIN
+        } else {
+            value as i32
+        };
+        if value == integer_value as f64 {
+            return Some(integer_value.to_string());
+        }
+
+        let first_attempt = Self::format_g(value, 15);
+        if Self::round_trips_with_cjson_epsilon(&first_attempt, value) {
+            return Some(first_attempt);
+        }
+
+        Some(Self::format_g(value, 17))
+    }
+
+    fn format_g(value: f64, precision: usize) -> String {
+        let exponent = Self::decimal_exponent(value);
+        let mut rendered = if (-4..precision as i32).contains(&exponent) {
+            let decimal_places = (precision as i32 - (exponent + 1)).max(0) as usize;
+            format!("{:.*}", decimal_places, value)
+        } else {
+            format!("{:.*e}", precision - 1, value)
+        };
+
+        if let Some(exponent_marker) = rendered.find('e') {
+            let mantissa = Self::strip_fraction_zeros(&rendered[..exponent_marker]);
+            let exponent: i32 = rendered[exponent_marker + 1..]
+                .parse()
+                .expect("Rust float formatting produces a valid exponent");
+            rendered = format!(
+                "{}e{}{:02}",
+                mantissa,
+                if exponent < 0 { '-' } else { '+' },
+                exponent.abs()
+            );
+        } else {
+            rendered = Self::strip_fraction_zeros(&rendered);
+        }
+        rendered
+    }
+
+    fn decimal_exponent(value: f64) -> i32 {
+        let magnitude = value.abs();
+        let mut exponent = magnitude.log10().floor() as i32;
+        while magnitude < 10_f64.powi(exponent) {
+            exponent -= 1;
+        }
+        while magnitude >= 10_f64.powi(exponent + 1) {
+            exponent += 1;
+        }
+        exponent
+    }
+
+    fn strip_fraction_zeros(value: &str) -> String {
+        let Some(decimal_point) = value.find('.') else {
+            return value.to_string();
+        };
+        let mut end = value.len();
+        while end > decimal_point + 1 && value.as_bytes()[end - 1] == b'0' {
+            end -= 1;
+        }
+        if end == decimal_point + 1 {
+            end -= 1;
+        }
+        value[..end].to_string()
+    }
+
+    fn round_trips_with_cjson_epsilon(rendered: &str, original: f64) -> bool {
+        let Ok(parsed) = rendered.parse::<f64>() else {
+            return false;
+        };
+        let max_value = parsed.abs().max(original.abs());
+        (parsed - original).abs() <= max_value * f64::EPSILON
+    }
+
     pub fn compare(&self, a: NodeId, b: NodeId, case_sensitive: bool) -> bool {
         if !self.is_live_node(a) || !self.is_live_node(b) {
             return false;
