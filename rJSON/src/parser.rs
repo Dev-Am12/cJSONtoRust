@@ -3,11 +3,12 @@
 //! This module is the Rust equivalent of the `parse_buffer` handling in
 //! upstream `cJSON.c` (`parse_value`, `parse_number`, `parse_string`,
 //! `parse_array`, `parse_object`, the literal branches of `parse_value`,
-//! `buffer_skip_whitespace`, and the `can_read` / `can_access_at_index`
-//! macros). It intentionally does **not** implement the top-level
-//! `cJSON_Parse`/`cJSON_ParseWithOpts` entry point (including UTF-8 BOM
-//! skipping) -- see `DECISIONS_personal.md` for the member-ownership
-//! split.
+//! `buffer_skip_whitespace`, `skip_utf8_bom`, and the `can_read` /
+//! `can_access_at_index` macros), plus the top-level
+//! `cJSON_Parse`/`cJSON_ParseWithOpts`/`cJSON_ParseWithLengthOpts` entry
+//! points (`cjson_parse`, `cjson_parse_with_opts`,
+//! `cjson_parse_with_length_opts`, near the bottom of this file) -- see
+//! `DECISIONS_personal.md` for the entry documenting these.
 //!
 //! Behavioral parity with upstream cJSON takes priority over idiomatic
 //! Rust throughout this file, per `AI_GUARDRAILS.md` §3.
@@ -70,12 +71,36 @@ impl<'a> Parser<'a> {
     /// The byte offset `cJSON_GetErrorPtr` would report right now.
     ///
     /// Reproduces the clamping `cJSON_ParseWithLengthOpts` performs in its
-    /// `fail:` branch: report the offset itself if it's still a valid
-    /// index into `input`, otherwise clamp to the last valid byte (or `0`
-    /// for empty input). Call this immediately after `parse_value`
-    /// returns `Err` for exact `cJSON_GetErrorPtr` parity.
+    /// `fail:` branch: `local_error.position = buffer.offset` if
+    /// `buffer.offset < buffer.length`, else `buffer.length - 1` if
+    /// `buffer.length > 0`, else `0`.
+    ///
+    /// **Bugfix (flagged per `AI_GUARDRAILS.md` §3.2/§7, made while wiring
+    /// up `cjson_parse_with_length_opts` -- see `DECISIONS_personal.md`):**
+    /// the in-bounds comparison here must be `<=`, not `<`. Upstream's
+    /// `buffer.length` (in the dominant `cJSON_Parse`/`cJSON_ParseWithOpts`
+    /// call path) is `strlen(value) + 1` -- one *past* the real content
+    /// length, to hold the NUL terminator -- so `buffer.offset < buffer.length`
+    /// is true even when `offset` has advanced exactly to the end of the
+    /// *real* content (`offset == strlen(value)`, i.e. `offset == input.len()`
+    /// in this port's terms, per the no-NUL-sentinel design in this file's
+    /// `skip_whitespace` doc comment). A strict `<` against `input.len()`
+    /// (this port's equivalent of `strlen(value)`, not `buffer.length`)
+    /// under-reports that case by one, clamping to `input.len() - 1`
+    /// instead of reporting `input.len()` -- observable, for example, when
+    /// parsing `"{ \"name\": "` fails for want of a value at the very end
+    /// of input: upstream reports the error at `json + strlen(json)`, not
+    /// one byte before it. Since every internal offset-advance in this
+    /// file is bounds-checked (`can_read`/`can_access_at_index`),
+    /// `current_offset` can never exceed `input.len()`, so this only ever
+    /// takes the `current_offset` branch or the (dead, kept only for
+    /// documentation/defensive-fallback parity with upstream's shape) `0`
+    /// branch for empty input -- the `input.len() - 1` branch is
+    /// unreachable in practice but left in place rather than deleted, so
+    /// this function's shape still visibly mirrors upstream's three-way
+    /// clamp.
     pub fn error_offset(&self) -> usize {
-        if self.current_offset < self.input.len() {
+        if self.current_offset <= self.input.len() {
             self.current_offset
         } else if !self.input.is_empty() {
             self.input.len() - 1
@@ -121,6 +146,37 @@ impl<'a> Parser<'a> {
     pub fn skip_whitespace(&mut self) {
         while self.can_access_at_index(0) && self.byte_at(0) <= 32 {
             self.current_offset += 1;
+        }
+    }
+
+    /// Equivalent to `skip_utf8_bom`: skips a leading UTF-8
+    /// byte-order-mark (`EF BB BF`) at the very start of `input`, if
+    /// present. A no-op if `current_offset != 0` (matches upstream's
+    /// `buffer->offset != 0` guard -- only ever meaningful immediately
+    /// after `Parser::new`, before any whitespace skip or parse call).
+    ///
+    /// **Length-check translation (flagged per `AI_GUARDRAILS.md` §3.2,
+    /// documented in `DECISIONS_personal.md`):** upstream's guard is
+    /// `can_access_at_index(buffer, 4)`, i.e. `offset + 4 < buffer.length`.
+    /// In the dominant `cJSON_Parse`/`cJSON_ParseWithOpts` call path,
+    /// `buffer.length == strlen(value) + 1` (one past the real content,
+    /// for the NUL terminator -- see `error_offset`'s doc comment for the
+    /// same translation), so that guard reduces, in terms of *real*
+    /// content length, to `4 < real_len + 1`, i.e. `real_len >= 4`. This
+    /// port has no NUL-terminator slot (`input.len()` already *is* the
+    /// real content length), so the direct translation is
+    /// `input.len() >= 4` at `current_offset == 0` -- confirmed against
+    /// upstream's own test fixtures (`misc_tests.c`'s
+    /// `skip_utf8_bom_should_skip_bom`, `sizeof("\xEF\xBB\xBF{}")` == 6,
+    /// i.e. real content length 5, well above this threshold; and
+    /// `parse_with_opts.c`'s `parse_with_opts_should_parse_utf8_bom`,
+    /// `"\xEF\xBB\xBF{}"` has real content length exactly 5).
+    pub fn skip_utf8_bom(&mut self) {
+        if self.current_offset != 0 {
+            return;
+        }
+        if self.input.len() >= 4 && self.input[0..3] == *b"\xEF\xBB\xBF" {
+            self.current_offset += 3;
         }
     }
 
@@ -850,6 +906,132 @@ fn strtod_prefix_len(s: &[u8]) -> usize {
     }
 
     i
+}
+
+/// A failed top-level parse, equivalent to what `cJSON_GetErrorPtr` would
+/// report after `cJSON_Parse`/`cJSON_ParseWithOpts`/`cJSON_ParseWithLengthOpts`
+/// returns `NULL`.
+///
+/// Upstream reports this via a mutable global (`global_error`) read
+/// separately through `cJSON_GetErrorPtr()`. Per `DECISIONS_personal.md`
+/// ("Error reporting" entry), this port returns the position directly
+/// instead of introducing `static mut`-equivalent shared state -- `position`
+/// is exactly the value `cJSON_GetErrorPtr() - value` would yield (a byte
+/// offset into the original `value` slice passed to whichever of the three
+/// functions below was called), with the same clamping upstream's `fail:`
+/// branch performs (see `Parser::error_offset`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CJsonParseError {
+    pub position: usize,
+}
+
+/// Equivalent to `cJSON_ParseWithLengthOpts`.
+///
+/// `value` plays the role of upstream's `(value, buffer_length)` pair
+/// together: a Rust `&[u8]` is already an explicitly-bounded buffer, so
+/// there is no separate `buffer_length` parameter here (unlike upstream,
+/// nothing in this port ever needs a NUL terminator to know where the
+/// buffer ends -- see `skip_whitespace`'s doc comment). This means, unlike
+/// upstream, this function is given the *exact* bytes to consider; it does
+/// not stop early at an embedded NUL byte the way `cjson_parse_with_opts`
+/// (below) deliberately does, matching the real difference between
+/// upstream's two functions (`cJSON_ParseWithOpts` computes its length via
+/// `strlen`, which cannot see past an embedded NUL; `cJSON_ParseWithLengthOpts`
+/// trusts its caller's explicit length instead).
+///
+/// On success, returns the root `NodeId` plus the "parse end" byte offset
+/// into `value` (equivalent to `*return_parse_end`/`buffer_at_offset(&buffer)`
+/// on upstream's success path). On failure, returns a `CJsonParseError`
+/// carrying the same offset upstream would expose via `cJSON_GetErrorPtr`
+/// (and would also have written to `*return_parse_end`, since upstream sets
+/// that out-parameter on both its success *and* failure paths with the same
+/// underlying position).
+///
+/// `require_null_terminated` matches upstream exactly: after a successful
+/// parse, any remaining bytes (other than whitespace) before the end of
+/// `value` cause this to fail instead, discarding the already-parsed tree
+/// -- mirroring upstream's `cJSON_Delete(item)` in that specific `fail:`
+/// path (see `DECISIONS.md` #6 for why a single `Arena::delete(root)` call
+/// is sufficient cleanup here, same as everywhere else in this port).
+pub fn cjson_parse_with_length_opts(
+    arena: &mut Arena,
+    value: &[u8],
+    require_null_terminated: bool,
+) -> Result<(NodeId, usize), CJsonParseError> {
+    // Matches `value == NULL || 0 == buffer_length` in
+    // `cJSON_ParseWithLengthOpts`: a Rust `&[u8]` can't be NULL (that
+    // upstream case is a C-FFI-layer concern, out of scope for this safe
+    // core engine per `DECISIONS.md` #3/#8's deferred facade layer -- see
+    // `DECISIONS_personal.md`), but an empty slice is the direct analogue
+    // of `buffer_length == 0`. Both short-circuit to failure before any
+    // node is allocated, at position `0`, exactly like upstream's `goto
+    // fail` before `buffer.content` is ever set.
+    if value.is_empty() {
+        return Err(CJsonParseError { position: 0 });
+    }
+
+    let mut parser = Parser::new(value, arena);
+    parser.skip_utf8_bom();
+    parser.skip_whitespace();
+
+    let root = match parser.parse_value() {
+        Ok(id) => id,
+        Err(_) => {
+            let position = parser.error_offset();
+            return Err(CJsonParseError { position });
+        }
+    };
+
+    if require_null_terminated {
+        parser.skip_whitespace();
+        if parser.current_offset() != value.len() {
+            // Trailing, non-whitespace content remains: upstream's
+            // `require_null_terminated` check fails here too, and its
+            // `fail:` label deletes the already-built `item` in this case
+            // exactly as it would for a parse-time failure.
+            let position = parser.error_offset();
+            arena.delete(root);
+            return Err(CJsonParseError { position });
+        }
+    }
+
+    let parse_end = parser.current_offset();
+    Ok((root, parse_end))
+}
+
+/// Equivalent to `cJSON_ParseWithOpts`.
+///
+/// Upstream computes `buffer_length = strlen(value) + sizeof("")` before
+/// delegating to `cJSON_ParseWithLengthOpts` -- meaning it only ever sees
+/// bytes up to (and not including) the first NUL byte in `value`, even if
+/// more bytes follow it in memory. This is reproduced here by truncating
+/// `value` at its first `0x00` byte (if any) before delegating to
+/// `cjson_parse_with_length_opts`, rather than simply forwarding the whole
+/// slice -- forwarding the whole slice would silently give this function
+/// `cJSON_ParseWithLengthOpts`'s actual behavior (seeing past an embedded
+/// NUL) instead of `cJSON_ParseWithOpts`'s (stopping at it), which upstream
+/// callers can and do rely on being different. Byte offsets returned (both
+/// the success `parse_end` and the failure `position`) are indices into
+/// this truncated prefix, which -- being a prefix -- are numerically
+/// identical to the corresponding indices into the original `value`.
+pub fn cjson_parse_with_opts(
+    arena: &mut Arena,
+    value: &[u8],
+    require_null_terminated: bool,
+) -> Result<(NodeId, usize), CJsonParseError> {
+    let truncated_len = value.iter().position(|&b| b == 0).unwrap_or(value.len());
+    cjson_parse_with_length_opts(arena, &value[..truncated_len], require_null_terminated)
+}
+
+/// Equivalent to `cJSON_Parse`: `cJSON_ParseWithOpts(value, NULL, false)`,
+/// i.e. no `return_parse_end` out-parameter and `require_null_terminated`
+/// off. The `(NodeId, usize)` pair upstream would have communicated only
+/// through the `return_parse_end` out-parameter and the return value is
+/// collapsed to just the `NodeId` here, since nothing reads `return_parse_end`
+/// through this entry point (matching upstream passing a literal `0` for
+/// it).
+pub fn cjson_parse(arena: &mut Arena, value: &[u8]) -> Result<NodeId, CJsonParseError> {
+    cjson_parse_with_opts(arena, value, false).map(|(id, _parse_end)| id)
 }
 
 /// Reproduces cJSON's `INT_MAX`/`INT_MIN` saturation for the deprecated

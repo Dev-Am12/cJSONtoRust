@@ -153,6 +153,20 @@ fn preserves_invalid_utf8_raw_bytes_unmodified() {
     assert_parse_string(&input, &expected);
 }
 
+/// Mirrors `parse_string_should_parse_bug_94`: a real upstream regression
+/// fixture with deeply nested backslash escapes (LDAP distinguished-name
+/// style content). Input/expected bytes were derived by mechanically
+/// decoding the original C string literal's own escaping (`\\` -> `\`,
+/// `\"` -> `"`) and independently verified by simulating cJSON's escape
+/// table against the result before transcribing here.
+#[test]
+fn parses_bug_94_nested_backslash_escapes() {
+    assert_parse_string(
+        b"\"~!@\\\\#$%^&*()\\\\\\\\-\\\\+{}[]:\\\\;\\\\\\\"\\\\<\\\\>?/.,DC=ad,DC=com\"",
+        b"~!@\\#$%^&*()\\\\-\\+{}[]:\\;\\\"\\<\\>?/.,DC=ad,DC=com",
+    );
+}
+
 /// Confirms the offset lands one past the closing quote, matching
 /// `input_buffer->offset = (input_end - content) + 1`.
 #[test]
