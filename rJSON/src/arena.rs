@@ -27,6 +27,7 @@ pub struct Node {
 
 pub struct Arena {
     nodes: Vec<Node>,
+    deleted: Vec<bool>,
 }
 
 impl Default for Arena {
@@ -37,12 +38,16 @@ impl Default for Arena {
 
 impl Arena {
     pub fn new() -> Self {
-        Self { nodes: Vec::new() }
+        Self {
+            nodes: Vec::new(),
+            deleted: Vec::new(),
+        }
     }
 
     pub fn alloc(&mut self, node: Node) -> NodeId {
         let id = NodeId(self.nodes.len());
         self.nodes.push(node);
+        self.deleted.push(false);
         id
     }
 
@@ -52,6 +57,44 @@ impl Arena {
 
     pub fn get_mut(&mut self, id: NodeId) -> &mut Node {
         &mut self.nodes[id.0]
+    }
+
+    pub fn is_deleted(&self, id: NodeId) -> bool {
+        self.deleted[id.0]
+    }
+
+    pub fn delete(&mut self, id: NodeId) {
+        self.delete_chain(Some(id));
+    }
+
+    fn delete_chain(&mut self, mut current: Option<NodeId>) {
+        while let Some(id) = current {
+            if self.is_deleted(id) {
+                return;
+            }
+
+            let (next, child, is_reference, key_is_const) = {
+                let node = self.get(id);
+                (node.next, node.child, node.is_reference, node.key_is_const)
+            };
+
+            if !is_reference {
+                self.delete_chain(child);
+            }
+
+            let node = self.get_mut(id);
+            node.next = None;
+            node.prev = None;
+            node.child = None;
+            if !is_reference {
+                node.value_string = None;
+                if !key_is_const {
+                    node.key = None;
+                }
+            }
+            self.deleted[id.0] = true;
+            current = next;
+        }
     }
 
     fn alloc_simple(
