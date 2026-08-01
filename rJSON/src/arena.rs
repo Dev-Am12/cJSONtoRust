@@ -103,6 +103,86 @@ impl Arena {
         id.0 < self.nodes.len() && !self.deleted[id.0]
     }
 
+    pub fn compare(&self, a: NodeId, b: NodeId, case_sensitive: bool) -> bool {
+        if !self.is_live_node(a) || !self.is_live_node(b) {
+            return false;
+        }
+        self.compare_nodes(a, b, case_sensitive)
+    }
+
+    fn compare_nodes(&self, a: NodeId, b: NodeId, case_sensitive: bool) -> bool {
+        let a_node = self.get(a);
+        let b_node = self.get(b);
+        if a_node.node_type != b_node.node_type {
+            return false;
+        }
+        if a == b {
+            return true;
+        }
+
+        match a_node.node_type {
+            NodeType::Null | NodeType::False | NodeType::True => true,
+            NodeType::Number => Self::compare_numbers(a_node.value_double, b_node.value_double),
+            NodeType::String | NodeType::Raw => {
+                match (&a_node.value_string, &b_node.value_string) {
+                    (Some(a_value), Some(b_value)) => a_value == b_value,
+                    _ => false,
+                }
+            }
+            NodeType::Array => self.compare_arrays(a_node.child, b_node.child, case_sensitive),
+            NodeType::Object => self.compare_objects(a, b, case_sensitive),
+        }
+    }
+
+    fn compare_numbers(a: f64, b: f64) -> bool {
+        let max_value = a.abs().max(b.abs());
+        (a - b).abs() <= max_value * f64::EPSILON
+    }
+
+    fn compare_arrays(
+        &self,
+        mut a_element: Option<NodeId>,
+        mut b_element: Option<NodeId>,
+        case_sensitive: bool,
+    ) -> bool {
+        loop {
+            match (a_element, b_element) {
+                (Some(a), Some(b)) => {
+                    if !self.compare_nodes(a, b, case_sensitive) {
+                        return false;
+                    }
+                    a_element = self.get(a).next;
+                    b_element = self.get(b).next;
+                }
+                (None, None) => return true,
+                _ => return false,
+            }
+        }
+    }
+
+    fn compare_objects(&self, a: NodeId, b: NodeId, case_sensitive: bool) -> bool {
+        self.object_members_match(a, b, case_sensitive)
+            && self.object_members_match(b, a, case_sensitive)
+    }
+
+    fn object_members_match(&self, source: NodeId, target: NodeId, case_sensitive: bool) -> bool {
+        let mut source_element = self.get(source).child;
+        while let Some(element) = source_element {
+            let node = self.get(element);
+            let Some(key) = node.key.as_deref() else {
+                return false;
+            };
+            let Some(match_in_target) = self.find_object_child(target, key, case_sensitive) else {
+                return false;
+            };
+            if !self.compare_nodes(element, match_in_target, case_sensitive) {
+                return false;
+            }
+            source_element = node.next;
+        }
+        true
+    }
+
     pub fn duplicate(&mut self, source: NodeId, recurse: bool) -> Option<NodeId> {
         if !self.is_live_node(source) {
             return None;
