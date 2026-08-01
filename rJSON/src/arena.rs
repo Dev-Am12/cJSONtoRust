@@ -31,6 +31,29 @@ pub struct Arena {
 }
 
 pub const CJSON_CIRCULAR_LIMIT: usize = 10_000;
+const CJSON_NESTING_LIMIT: usize = 1_000;
+
+fn escape_json_bytes(input: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(input.len() + 2);
+    output.push(b'"');
+    for &byte in input {
+        match byte {
+            b'"' => output.extend_from_slice(b"\\\""),
+            b'\\' => output.extend_from_slice(b"\\\\"),
+            b'\x08' => output.extend_from_slice(b"\\b"),
+            b'\x0c' => output.extend_from_slice(b"\\f"),
+            b'\n' => output.extend_from_slice(b"\\n"),
+            b'\r' => output.extend_from_slice(b"\\r"),
+            b'\t' => output.extend_from_slice(b"\\t"),
+            0..=0x1f => {
+                output.extend_from_slice(format!("\\u{byte:04x}").as_bytes());
+            }
+            _ => output.push(byte),
+        }
+    }
+    output.push(b'"');
+    output
+}
 
 impl Default for Arena {
     fn default() -> Self {
@@ -101,6 +124,10 @@ impl Arena {
 
     fn is_live_node(&self, id: NodeId) -> bool {
         id.0 < self.nodes.len() && !self.deleted[id.0]
+    }
+
+    fn live_node(&self, id: NodeId) -> Option<&Node> {
+        self.is_live_node(id).then(|| self.get(id))
     }
 
     pub fn print_number(&self, id: NodeId) -> Option<String> {
@@ -760,6 +787,102 @@ impl Arena {
         node.next = None;
         node.prev = None;
         node.key = key;
+    }
+
+    pub fn print_string(&self, id: NodeId) -> Option<Vec<u8>> {
+        let node = self.live_node(id)?;
+        Some(escape_json_bytes(node.value_string.as_deref()?))
+    }
+
+    pub fn print_value(&self, id: NodeId, pretty: bool) -> Option<Vec<u8>> {
+        self.print_value_at(id, pretty, 0)
+    }
+
+    pub fn print_array(&self, id: NodeId, pretty: bool) -> Option<Vec<u8>> {
+        self.print_array_at(id, pretty, 0)
+    }
+
+    pub fn print_object(&self, id: NodeId, pretty: bool) -> Option<Vec<u8>> {
+        self.print_object_at(id, pretty, 0)
+    }
+
+    fn print_value_at(&self, id: NodeId, pretty: bool, depth: usize) -> Option<Vec<u8>> {
+        let node_type = self.live_node(id)?.node_type;
+        match node_type {
+            NodeType::Null => Some(b"null".to_vec()),
+            NodeType::False => Some(b"false".to_vec()),
+            NodeType::True => Some(b"true".to_vec()),
+            NodeType::Number => Some(self.print_number(id)?.into_bytes()),
+            NodeType::String => self.print_string(id),
+            NodeType::Raw => Some(self.live_node(id)?.value_string.clone()?),
+            NodeType::Array => self.print_array_at(id, pretty, depth),
+            NodeType::Object => self.print_object_at(id, pretty, depth),
+        }
+    }
+
+    fn print_array_at(&self, id: NodeId, pretty: bool, depth: usize) -> Option<Vec<u8>> {
+        if depth >= CJSON_NESTING_LIMIT {
+            return None;
+        }
+        let mut output = b"[".to_vec();
+        let mut child = self.live_node(id)?.child;
+        let mut first = true;
+        while let Some(child_id) = child {
+            if !first {
+                output.push(b',');
+                if pretty {
+                    output.push(b' ');
+                }
+            }
+            output.extend_from_slice(&self.print_value_at(child_id, pretty, depth + 1)?);
+            child = self.live_node(child_id)?.next;
+            first = false;
+        }
+        output.push(b']');
+        Some(output)
+    }
+
+    fn print_object_at(&self, id: NodeId, pretty: bool, depth: usize) -> Option<Vec<u8>> {
+        if depth >= CJSON_NESTING_LIMIT {
+            return None;
+        }
+        let mut output = b"{".to_vec();
+        if pretty {
+            output.push(b'\n');
+        }
+
+        let mut child = self.live_node(id)?.child;
+        let mut first = true;
+        while let Some(child_id) = child {
+            let child_node = self.live_node(child_id)?;
+            let key = child_node.key.as_deref()?;
+            let next = child_node.next;
+            if !first && !pretty {
+                output.push(b',');
+            }
+            if pretty {
+                output.extend(std::iter::repeat_n(b'\t', depth + 1));
+            }
+            output.extend_from_slice(&escape_json_bytes(key));
+            output.push(b':');
+            if pretty {
+                output.push(b'\t');
+            }
+            output.extend_from_slice(&self.print_value_at(child_id, pretty, depth + 1)?);
+            if pretty && next.is_some() {
+                output.push(b',');
+            }
+            if pretty {
+                output.push(b'\n');
+            }
+            child = next;
+            first = false;
+        }
+        if pretty {
+            output.extend(std::iter::repeat_n(b'\t', depth));
+        }
+        output.push(b'}');
+        Some(output)
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId, key: Option<Vec<u8>>) {
