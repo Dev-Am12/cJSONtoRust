@@ -1,0 +1,6 @@
+target
+corpus/*
+artifacts
+!corpus/fuzz_parse
+corpus/fuzz_parse/*
+!corpus/fuzz_parse/seed_*
