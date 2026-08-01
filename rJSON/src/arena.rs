@@ -806,6 +806,42 @@ impl Arena {
         self.print_object_at(id, pretty, 0)
     }
 
+    pub fn print(&self, id: NodeId) -> Option<Vec<u8>> {
+        self.print_value(id, true)
+    }
+
+    pub fn print_unformatted(&self, id: NodeId) -> Option<Vec<u8>> {
+        self.print_value(id, false)
+    }
+
+    pub fn print_buffered(
+        &self,
+        id: NodeId,
+        prebuffer: i32,
+        pretty: bool,
+    ) -> Option<Vec<u8>> {
+        if prebuffer < 0 {
+            return None;
+        }
+        self.print_value(id, pretty)
+    }
+
+    pub fn print_preallocated(
+        &self,
+        id: NodeId,
+        buffer: &mut [u8],
+        pretty: bool,
+    ) -> bool {
+        let Some(output) = self.print_value(id, pretty) else {
+            return false;
+        };
+        if output.len() > buffer.len() {
+            return false;
+        }
+        buffer[..output.len()].copy_from_slice(&output);
+        true
+    }
+
     fn print_value_at(&self, id: NodeId, pretty: bool, depth: usize) -> Option<Vec<u8>> {
         let node_type = self.live_node(id)?.node_type;
         match node_type {
