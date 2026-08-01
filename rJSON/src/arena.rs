@@ -105,12 +105,48 @@ impl Arena {
         self.alloc_simple(NodeType::Raw, Some(value), 0.0)
     }
 
+    pub fn create_string_reference(&mut self, value: Vec<u8>) -> NodeId {
+        let id = self.alloc_simple(NodeType::String, Some(value), 0.0);
+        self.get_mut(id).is_reference = true;
+        id
+    }
+
     pub fn create_array(&mut self) -> NodeId {
         self.alloc_simple(NodeType::Array, None, 0.0)
     }
 
     pub fn create_object(&mut self) -> NodeId {
         self.alloc_simple(NodeType::Object, None, 0.0)
+    }
+
+    pub fn create_object_reference(&mut self, source: NodeId) -> NodeId {
+        let child = self.get(source).child;
+        self.alloc(Node {
+            next: None,
+            prev: None,
+            child,
+            node_type: NodeType::Object,
+            value_string: None,
+            value_double: 0.0,
+            key: None,
+            is_reference: true,
+            key_is_const: false,
+        })
+    }
+
+    pub fn create_array_reference(&mut self, source: NodeId) -> NodeId {
+        let child = self.get(source).child;
+        self.alloc(Node {
+            next: None,
+            prev: None,
+            child,
+            node_type: NodeType::Array,
+            value_string: None,
+            value_double: 0.0,
+            key: None,
+            is_reference: true,
+            key_is_const: false,
+        })
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId, key: Option<Vec<u8>>) {
