@@ -365,6 +365,128 @@ impl Arena {
         true
     }
 
+    pub fn insert_item_in_array(&mut self, array: NodeId, index: usize, item: NodeId) -> bool {
+        if array == item || !self.is_live_node(array) || !self.is_live_node(item) {
+            return false;
+        }
+
+        let mut inserted_before = self.get(array).child;
+        for _ in 0..index {
+            inserted_before = inserted_before.and_then(|id| self.get(id).next);
+        }
+
+        let Some(inserted_before) = inserted_before else {
+            return self.add_item_to_array(array, item);
+        };
+        let previous = self.get(inserted_before).prev;
+
+        self.reset_attachment(item, None);
+        self.get_mut(item).next = Some(inserted_before);
+        self.get_mut(item).prev = previous;
+        self.get_mut(inserted_before).prev = Some(item);
+        match previous {
+            Some(previous) => self.get_mut(previous).next = Some(item),
+            None => self.get_mut(array).child = Some(item),
+        }
+        true
+    }
+
+    pub fn replace_item_via_pointer(
+        &mut self,
+        parent: NodeId,
+        old_item: NodeId,
+        new_item: NodeId,
+    ) -> bool {
+        if parent == new_item
+            || !self.is_live_node(parent)
+            || !self.is_live_node(old_item)
+            || !self.is_live_node(new_item)
+        {
+            return false;
+        }
+
+        let mut previous = None;
+        let mut current = self.get(parent).child;
+        while let Some(id) = current {
+            if id == old_item {
+                break;
+            }
+            previous = Some(id);
+            current = self.get(id).next;
+        }
+        if current != Some(old_item) {
+            return false;
+        }
+
+        if old_item == new_item {
+            return true;
+        }
+
+        let next = self.get(old_item).next;
+        self.get_mut(new_item).next = next;
+        self.get_mut(new_item).prev = previous;
+
+        if let Some(next) = next {
+            self.get_mut(next).prev = Some(new_item);
+        }
+        match previous {
+            Some(previous) => self.get_mut(previous).next = Some(new_item),
+            None => self.get_mut(parent).child = Some(new_item),
+        }
+
+        self.get_mut(old_item).next = None;
+        self.get_mut(old_item).prev = None;
+        self.delete(old_item);
+        true
+    }
+
+    pub fn replace_item_in_array(&mut self, array: NodeId, index: usize, new_item: NodeId) -> bool {
+        if !self.is_live_node(array) || !self.is_live_node(new_item) {
+            return false;
+        }
+
+        let mut old_item = self.get(array).child;
+        for _ in 0..index {
+            old_item = old_item.and_then(|id| self.get(id).next);
+        }
+        let Some(old_item) = old_item else {
+            return false;
+        };
+        self.replace_item_via_pointer(array, old_item, new_item)
+    }
+
+    pub fn replace_item_in_object(&mut self, object: NodeId, key: &[u8], new_item: NodeId) -> bool {
+        self.replace_item_in_object_by_case(object, key, new_item, false)
+    }
+
+    pub fn replace_item_in_object_case_sensitive(
+        &mut self,
+        object: NodeId,
+        key: &[u8],
+        new_item: NodeId,
+    ) -> bool {
+        self.replace_item_in_object_by_case(object, key, new_item, true)
+    }
+
+    fn replace_item_in_object_by_case(
+        &mut self,
+        object: NodeId,
+        key: &[u8],
+        new_item: NodeId,
+        case_sensitive: bool,
+    ) -> bool {
+        if !self.is_live_node(object) || !self.is_live_node(new_item) {
+            return false;
+        }
+
+        self.get_mut(new_item).key = Some(key.to_vec());
+        self.get_mut(new_item).key_is_const = false;
+        let Some(old_item) = self.find_object_child(object, key, case_sensitive) else {
+            return false;
+        };
+        self.replace_item_via_pointer(object, old_item, new_item)
+    }
+
     fn find_object_child(
         &self,
         object: NodeId,
