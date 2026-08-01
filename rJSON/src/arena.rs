@@ -97,6 +97,10 @@ impl Arena {
         }
     }
 
+    fn is_live_node(&self, id: NodeId) -> bool {
+        id.0 < self.nodes.len() && !self.deleted[id.0]
+    }
+
     fn alloc_simple(
         &mut self,
         node_type: NodeType,
@@ -190,6 +194,93 @@ impl Arena {
             is_reference: true,
             key_is_const: false,
         })
+    }
+
+    pub fn add_item_to_array(&mut self, array: NodeId, item: NodeId) -> bool {
+        if array == item || !self.is_live_node(array) || !self.is_live_node(item) {
+            return false;
+        }
+
+        self.append_child(array, item, None);
+        true
+    }
+
+    pub fn add_item_to_object(&mut self, object: NodeId, key: Vec<u8>, item: NodeId) -> bool {
+        if object == item || !self.is_live_node(object) || !self.is_live_node(item) {
+            return false;
+        }
+
+        self.append_child(object, item, Some(key));
+        true
+    }
+
+    fn add_created_to_object(
+        &mut self,
+        object: NodeId,
+        key: Vec<u8>,
+        item: NodeId,
+    ) -> Option<NodeId> {
+        if self.add_item_to_object(object, key, item) {
+            Some(item)
+        } else {
+            self.delete(item);
+            None
+        }
+    }
+
+    pub fn add_null_to_object(&mut self, object: NodeId, key: Vec<u8>) -> Option<NodeId> {
+        let item = self.create_null();
+        self.add_created_to_object(object, key, item)
+    }
+
+    pub fn add_true_to_object(&mut self, object: NodeId, key: Vec<u8>) -> Option<NodeId> {
+        let item = self.create_true();
+        self.add_created_to_object(object, key, item)
+    }
+
+    pub fn add_false_to_object(&mut self, object: NodeId, key: Vec<u8>) -> Option<NodeId> {
+        let item = self.create_false();
+        self.add_created_to_object(object, key, item)
+    }
+
+    pub fn add_bool_to_object(
+        &mut self,
+        object: NodeId,
+        key: Vec<u8>,
+        value: bool,
+    ) -> Option<NodeId> {
+        let item = self.create_bool(value);
+        self.add_created_to_object(object, key, item)
+    }
+
+    pub fn add_number_to_object(
+        &mut self,
+        object: NodeId,
+        key: Vec<u8>,
+        value: f64,
+    ) -> Option<NodeId> {
+        let item = self.create_number(value);
+        self.add_created_to_object(object, key, item)
+    }
+
+    pub fn add_string_to_object(
+        &mut self,
+        object: NodeId,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    ) -> Option<NodeId> {
+        let item = self.create_string(value);
+        self.add_created_to_object(object, key, item)
+    }
+
+    pub fn add_raw_to_object(
+        &mut self,
+        object: NodeId,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    ) -> Option<NodeId> {
+        let item = self.create_raw(value);
+        self.add_created_to_object(object, key, item)
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId, key: Option<Vec<u8>>) {
