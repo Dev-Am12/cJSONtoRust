@@ -156,6 +156,13 @@ impl<'a> Parser<'a> {
             return Ok(id);
         }
 
+        if self.can_access_at_index(0) && self.byte_at(0) == b'"' {
+            return match self.parse_string() {
+                Some(bytes) => Ok(self.arena.create_string(bytes)),
+                None => Err(ParseError),
+            };
+        }
+
         if self.can_access_at_index(0) {
             let c = self.byte_at(0);
             if c == b'-' || c.is_ascii_digit() {
@@ -164,6 +171,238 @@ impl<'a> Parser<'a> {
         }
 
         Err(ParseError)
+    }
+
+    /// Equivalent to `parse_string` in upstream `cJSON.c`, minus the
+    /// `cJSON` item plumbing (the caller, `parse_value`, wraps the
+    /// returned bytes into a `String` node via `Arena::create_string`).
+    ///
+    /// Decodes the JSON string literal starting at `current_offset`
+    /// (which must be the opening `"`), and returns the *raw, unescaped*
+    /// byte content -- deliberately `Vec<u8>`, never `String`, since
+    /// upstream's raw UTF-8 passthrough (`DECISIONS.md` #3, "invalid
+    /// UTF-8 bytes preserved as-is") cannot be represented in a Rust
+    /// `String`. Un-escaped literal bytes (anything not part of a `\`
+    /// sequence) are copied through completely unvalidated, exactly as
+    /// upstream's `*output_pointer++ = *input_pointer++;` does -- this
+    /// function never calls `str::from_utf8` or any other UTF-8
+    /// validation on string *content*, per this task's constraints.
+    ///
+    /// On success, advances `current_offset` to one past the closing
+    /// `"`, matching `input_buffer->offset = (input_end - content) + 1`.
+    /// On failure, `current_offset` is left at the exact byte offset
+    /// upstream's `fail:` label would set (`input_pointer - content`),
+    /// so `error_offset()` stays byte-for-byte compatible with
+    /// `cJSON_GetErrorPtr` even for string-parse failures.
+    fn parse_string(&mut self) -> Option<Vec<u8>> {
+        // Not a string: caller checked byte_at(0) == '"' already, but
+        // upstream re-checks this itself at the top of parse_string, so
+        // this mirrors that (also makes the method safe to call
+        // standalone).
+        if !self.can_access_at_index(0) || self.byte_at(0) != b'"' {
+            return None;
+        }
+
+        let content_start = self.current_offset + 1;
+
+        // First pass: find the closing quote, matching upstream's
+        // "calculate approximate size of the output" scan exactly,
+        // including its failure modes (unterminated escape at EOF,
+        // unterminated string).
+        let mut input_end = content_start;
+        let mut skipped_bytes = 0usize;
+        while input_end < self.input.len() && self.input[input_end] != b'"' {
+            if self.input[input_end] == b'\\' {
+                if input_end + 1 >= self.input.len() {
+                    // Backslash is the last byte in the input: matches
+                    // upstream's buffer-overflow guard.
+                    self.current_offset = input_end;
+                    return None;
+                }
+                skipped_bytes += 1;
+                input_end += 1;
+            }
+            input_end += 1;
+        }
+        if input_end >= self.input.len() || self.input[input_end] != b'"' {
+            // String ended unexpectedly (ran off the end of input
+            // without finding a closing quote).
+            self.current_offset = input_end;
+            return None;
+        }
+
+        // This is at most how much output we need -- upstream allocates
+        // exactly this; we just use it as a `Vec` capacity hint since
+        // the arena/Vec design has no separate allocator to size.
+        let allocation_length = (input_end - content_start) - skipped_bytes;
+        let mut output = Vec::with_capacity(allocation_length);
+
+        // Second pass: decode the literal.
+        let mut input_pointer = content_start;
+        while input_pointer < input_end {
+            if self.input[input_pointer] != b'\\' {
+                // Raw passthrough: no UTF-8 validation, matches upstream
+                // exactly (this is what preserves invalid UTF-8 /
+                // malformed byte sequences byte-for-byte, per this
+                // task's requirement 5).
+                output.push(self.input[input_pointer]);
+                input_pointer += 1;
+                continue;
+            }
+
+            // Escape sequence. Upstream's `(input_end - input_pointer) < 1`
+            // guard is unreachable dead code here (the enclosing `while
+            // input_pointer < input_end` already guarantees at least 1
+            // byte remains), reproduced only in spirit via the loop
+            // condition itself -- there is no behavior to diverge on.
+            let mut sequence_length: usize = 2;
+            let escape_char = self.input[input_pointer + 1];
+            match escape_char {
+                b'b' => output.push(0x08),
+                b'f' => output.push(0x0C),
+                b'n' => output.push(b'\n'),
+                b'r' => output.push(b'\r'),
+                b't' => output.push(b'\t'),
+                b'"' | b'\\' | b'/' => output.push(escape_char),
+                b'u' => match self.utf16_literal_to_utf8(input_pointer, input_end, &mut output) {
+                    Some(len) => sequence_length = len,
+                    None => {
+                        self.current_offset = input_pointer;
+                        return None;
+                    }
+                },
+                _ => {
+                    self.current_offset = input_pointer;
+                    return None;
+                }
+            }
+            input_pointer += sequence_length;
+        }
+
+        self.current_offset = input_end + 1;
+        Some(output)
+    }
+
+    /// Equivalent to `utf16_literal_to_utf8`. `first_sequence` and
+    /// `input_end` are absolute byte offsets into `self.input`:
+    /// `first_sequence` is the offset of the leading backslash of a
+    /// `\uXXXX` escape (or the first half of a `\uXXXX\uXXXX` surrogate
+    /// pair); `input_end` is the offset of the string's closing quote
+    /// (the same bound `parse_string`'s decode loop uses). On success,
+    /// pushes the UTF-8 encoding of the resulting codepoint onto
+    /// `output` and returns how many input bytes the escape consumed (6
+    /// for a lone `\uXXXX`, 12 for a surrogate pair). Returns `None` for
+    /// every upstream failure mode (`goto fail`).
+    fn utf16_literal_to_utf8(
+        &self,
+        first_sequence: usize,
+        input_end: usize,
+        output: &mut Vec<u8>,
+    ) -> Option<usize> {
+        if input_end - first_sequence < 6 {
+            // input ends unexpectedly
+            return None;
+        }
+
+        // get the first utf16 sequence
+        let first_code = self.parse_hex4(first_sequence + 2);
+
+        // check that the code is valid
+        if (0xDC00..=0xDFFF).contains(&first_code) {
+            return None;
+        }
+
+        let (codepoint, sequence_length): (u32, usize) = if (0xD800..=0xDBFF).contains(&first_code)
+        {
+            // UTF16 surrogate pair
+            let second_sequence = first_sequence + 6;
+            if input_end - second_sequence < 6 {
+                // input ends unexpectedly
+                return None;
+            }
+            if self.input[second_sequence] != b'\\' || self.input[second_sequence + 1] != b'u' {
+                // missing second half of the surrogate pair
+                return None;
+            }
+            // get the second utf16 sequence
+            let second_code = self.parse_hex4(second_sequence + 2);
+            if !(0xDC00..=0xDFFF).contains(&second_code) {
+                // invalid second half of the surrogate pair
+                return None;
+            }
+            // calculate the unicode codepoint from the surrogate pair
+            let cp = 0x10000u32 + (((first_code & 0x3FF) << 10) | (second_code & 0x3FF));
+            (cp, 12)
+        } else {
+            (first_code, 6)
+        };
+
+        // Encode as UTF-8 -- hand-written to match upstream's manual
+        // encoder byte-for-byte, deliberately not routed through Rust's
+        // `char`/`String` (a lone surrogate half can never reach here
+        // given the checks above, but a manual encoder also sidesteps
+        // relying on `char::from_u32` ever agreeing with upstream at the
+        // boundary).
+        match codepoint {
+            0x0000..=0x007F => {
+                // normal ascii, encoding 0xxxxxxx
+                output.push(codepoint as u8);
+            }
+            0x0080..=0x07FF => {
+                // two bytes, encoding 110xxxxx 10xxxxxx
+                output.push(0xC0 | ((codepoint >> 6) as u8));
+                output.push(0x80 | ((codepoint & 0x3F) as u8));
+            }
+            0x0800..=0xFFFF => {
+                // three bytes, encoding 1110xxxx 10xxxxxx 10xxxxxx
+                output.push(0xE0 | ((codepoint >> 12) as u8));
+                output.push(0x80 | (((codepoint >> 6) & 0x3F) as u8));
+                output.push(0x80 | ((codepoint & 0x3F) as u8));
+            }
+            0x10000..=0x10FFFF => {
+                // four bytes, encoding 1110xxxx 10xxxxxx 10xxxxxx 10xxxxxx
+                output.push(0xF0 | ((codepoint >> 18) as u8));
+                output.push(0x80 | (((codepoint >> 12) & 0x3F) as u8));
+                output.push(0x80 | (((codepoint >> 6) & 0x3F) as u8));
+                output.push(0x80 | ((codepoint & 0x3F) as u8));
+            }
+            // invalid unicode codepoint -- unreachable: the surrogate
+            // branch's max is 0x10FFFF and the non-surrogate branch's
+            // max is 0xFFFF (0xD800..=0xDFFF is excluded above), but
+            // upstream has this arm and we keep it for exact parity.
+            _ => return None,
+        }
+
+        Some(sequence_length)
+    }
+
+    /// Equivalent to `parse_hex4`. Reproduces its exact upstream quirk on
+    /// purpose (per `AI_GUARDRAILS.md` §3.1, "replicate exactly by
+    /// default"): an invalid hex digit does *not* fail the parse -- the
+    /// whole 4-digit value silently collapses to `0`, indistinguishable
+    /// from a literal `\u0000`. This is because upstream's loop does
+    /// `return 0;` the instant it sees a non-hex-digit byte, abandoning
+    /// the remaining digits rather than reporting failure to its caller.
+    ///
+    /// Caller contract: `at + 4 <= self.input.len()` must already hold
+    /// (both call sites establish this via the `< 6` bounds checks in
+    /// `utf16_literal_to_utf8` before calling this).
+    fn parse_hex4(&self, at: usize) -> u32 {
+        let mut h: u32 = 0;
+        for i in 0..4 {
+            let c = self.input[at + i];
+            let digit = match c {
+                b'0'..=b'9' => (c - b'0') as u32,
+                b'A'..=b'F' => 10 + (c - b'A') as u32,
+                b'a'..=b'f' => 10 + (c - b'a') as u32,
+                _ => return 0, // exact upstream quirk -- see doc comment
+            };
+            h += digit;
+            if i < 3 {
+                h <<= 4;
+            }
+        }
+        h
     }
 
     /// Equivalent to `parse_number`.
