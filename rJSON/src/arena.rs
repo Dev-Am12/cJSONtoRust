@@ -1,7 +1,7 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NodeId(pub usize);
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NodeType {
     Null,
     False,
@@ -29,6 +29,8 @@ pub struct Arena {
     nodes: Vec<Node>,
     deleted: Vec<bool>,
 }
+
+pub const CJSON_CIRCULAR_LIMIT: usize = 10_000;
 
 impl Default for Arena {
     fn default() -> Self {
@@ -99,6 +101,74 @@ impl Arena {
 
     fn is_live_node(&self, id: NodeId) -> bool {
         id.0 < self.nodes.len() && !self.deleted[id.0]
+    }
+
+    pub fn duplicate(&mut self, source: NodeId, recurse: bool) -> Option<NodeId> {
+        if !self.is_live_node(source) {
+            return None;
+        }
+
+        let root = self.duplicate_single_node(source);
+        let mut duplicated_nodes = vec![root];
+        if !recurse {
+            return Some(root);
+        }
+
+        let mut pending = vec![(source, root, 0_usize)];
+        while let Some((source_parent, duplicate_parent, depth)) = pending.pop() {
+            let mut source_child = self.get(source_parent).child;
+            let mut previous_duplicate_child = None;
+
+            while let Some(child) = source_child {
+                if depth >= CJSON_CIRCULAR_LIMIT || !self.is_live_node(child) {
+                    self.discard_nodes(&duplicated_nodes);
+                    return None;
+                }
+
+                let source_next = self.get(child).next;
+                let duplicate_child = self.duplicate_single_node(child);
+                duplicated_nodes.push(duplicate_child);
+
+                match previous_duplicate_child {
+                    Some(previous) => self.get_mut(previous).next = Some(duplicate_child),
+                    None => self.get_mut(duplicate_parent).child = Some(duplicate_child),
+                }
+                self.get_mut(duplicate_child).prev = previous_duplicate_child;
+
+                pending.push((child, duplicate_child, depth + 1));
+                previous_duplicate_child = Some(duplicate_child);
+                source_child = source_next;
+            }
+        }
+
+        Some(root)
+    }
+
+    fn duplicate_single_node(&mut self, source: NodeId) -> NodeId {
+        let node = self.get(source);
+        self.alloc(Node {
+            next: None,
+            prev: None,
+            child: None,
+            node_type: node.node_type,
+            value_string: node.value_string.clone(),
+            value_double: node.value_double,
+            key: node.key.clone(),
+            is_reference: false,
+            key_is_const: false,
+        })
+    }
+
+    fn discard_nodes(&mut self, nodes: &[NodeId]) {
+        for &id in nodes {
+            let node = self.get_mut(id);
+            node.next = None;
+            node.prev = None;
+            node.child = None;
+            node.value_string = None;
+            node.key = None;
+            self.deleted[id.0] = true;
+        }
     }
 
     fn alloc_simple(
