@@ -33,6 +33,66 @@ pub struct Arena {
 pub const CJSON_CIRCULAR_LIMIT: usize = 10_000;
 const CJSON_NESTING_LIMIT: usize = 1_000;
 
+pub fn minify(input: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(input.len());
+    let mut index = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while index < input.len() {
+        let byte = input[index];
+        if in_string {
+            output.push(byte);
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        match byte {
+            b'"' => {
+                in_string = true;
+                output.push(byte);
+                index += 1;
+            }
+            b' ' | b'\t' | b'\r' | b'\n' => index += 1,
+            b'/' if input.get(index + 1) == Some(&b'/') => {
+                index += 2;
+                while index < input.len() && input[index] != b'\n' {
+                    index += 1;
+                }
+                if index < input.len() {
+                    index += 1;
+                }
+            }
+            b'/' if input.get(index + 1) == Some(&b'*') => {
+                index += 2;
+                while index + 1 < input.len()
+                    && !(input[index] == b'*' && input[index + 1] == b'/')
+                {
+                    index += 1;
+                }
+                if index + 1 < input.len() {
+                    index += 2;
+                } else {
+                    index = input.len();
+                }
+            }
+            _ => {
+                output.push(byte);
+                index += 1;
+            }
+        }
+    }
+
+    output
+}
+
 fn escape_json_bytes(input: &[u8]) -> Vec<u8> {
     let mut output = Vec::with_capacity(input.len() + 2);
     output.push(b'"');
