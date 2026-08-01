@@ -283,12 +283,128 @@ impl Arena {
         self.add_created_to_object(object, key, item)
     }
 
+    pub fn detach_item_via_pointer(&mut self, parent: NodeId, item: NodeId) -> Option<NodeId> {
+        if !self.is_live_node(parent) || !self.is_live_node(item) {
+            return None;
+        }
+
+        let mut previous = None;
+        let mut current = self.get(parent).child;
+        while let Some(id) = current {
+            if id == item {
+                break;
+            }
+            previous = Some(id);
+            current = self.get(id).next;
+        }
+
+        if current != Some(item) {
+            return None;
+        }
+
+        let next = self.get(item).next;
+        match previous {
+            Some(previous) => self.get_mut(previous).next = next,
+            None => self.get_mut(parent).child = next,
+        }
+        if let Some(next) = next {
+            self.get_mut(next).prev = previous;
+        }
+
+        self.reset_attachment(item, None);
+        Some(item)
+    }
+
+    pub fn detach_item_from_array(&mut self, array: NodeId, index: usize) -> Option<NodeId> {
+        if !self.is_live_node(array) {
+            return None;
+        }
+
+        let mut current = self.get(array).child;
+        for _ in 0..index {
+            current = current.and_then(|id| self.get(id).next);
+        }
+        self.detach_item_via_pointer(array, current?)
+    }
+
+    pub fn detach_item_from_object(&mut self, object: NodeId, key: &[u8]) -> Option<NodeId> {
+        let item = self.find_object_child(object, key, false)?;
+        self.detach_item_via_pointer(object, item)
+    }
+
+    pub fn detach_item_from_object_case_sensitive(
+        &mut self,
+        object: NodeId,
+        key: &[u8],
+    ) -> Option<NodeId> {
+        let item = self.find_object_child(object, key, true)?;
+        self.detach_item_via_pointer(object, item)
+    }
+
+    pub fn delete_item_from_array(&mut self, array: NodeId, index: usize) -> bool {
+        let Some(item) = self.detach_item_from_array(array, index) else {
+            return false;
+        };
+        self.delete(item);
+        true
+    }
+
+    pub fn delete_item_from_object(&mut self, object: NodeId, key: &[u8]) -> bool {
+        let Some(item) = self.detach_item_from_object(object, key) else {
+            return false;
+        };
+        self.delete(item);
+        true
+    }
+
+    pub fn delete_item_from_object_case_sensitive(&mut self, object: NodeId, key: &[u8]) -> bool {
+        let Some(item) = self.detach_item_from_object_case_sensitive(object, key) else {
+            return false;
+        };
+        self.delete(item);
+        true
+    }
+
+    fn find_object_child(
+        &self,
+        object: NodeId,
+        key: &[u8],
+        case_sensitive: bool,
+    ) -> Option<NodeId> {
+        if !self.is_live_node(object) {
+            return None;
+        }
+
+        let mut current = self.get(object).child;
+        while let Some(id) = current {
+            let node = self.get(id);
+            let matches = node.key.as_deref().is_some_and(|candidate| {
+                if case_sensitive {
+                    candidate == key
+                } else {
+                    candidate.eq_ignore_ascii_case(key)
+                }
+            });
+            if matches {
+                return Some(id);
+            }
+            current = node.next;
+        }
+
+        None
+    }
+
+    fn reset_attachment(&mut self, item: NodeId, key: Option<Vec<u8>>) {
+        let node = self.get_mut(item);
+        node.next = None;
+        node.prev = None;
+        node.key = key;
+    }
+
     pub fn append_child(&mut self, parent: NodeId, child: NodeId, key: Option<Vec<u8>>) {
         assert_ne!(parent, child, "a node cannot be its own child");
 
-        self.get_mut(child).next = None;
-        self.get_mut(child).prev = None;
-        self.get_mut(child).key = key;
+        self.reset_attachment(child, key);
 
         let first_child = self.get(parent).child;
         match first_child {
