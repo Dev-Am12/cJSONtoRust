@@ -1,0 +1,29 @@
+[package]
+name = "rjson-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.rjson]
+path = ".."
+
+# Standalone workspace: keeps this fuzz crate (and its nightly-only
+# libfuzzer-sys dependency) fully isolated from the main `rjson` crate's
+# build/toolchain (`rust-toolchain.toml` pins 1.97.1 stable; cargo-fuzz
+# needs nightly). Without this, Cargo would otherwise fold `fuzz/` into
+# an implicit parent workspace and `cargo build`/`cargo test` at the
+# `rJSON/` root could be affected by this crate's dependency resolution.
+[workspace]
+
+[[bin]]
+name = "fuzz_parse"
+path = "fuzz_targets/fuzz_parse.rs"
+test = false
+doc = false
+bench = false
