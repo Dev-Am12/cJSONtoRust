@@ -83,3 +83,13 @@ Ownership during deletion follows the original's actual dual-flag rule precisely
 **Finding, not yet a design decision — logged for whoever builds the facade layer:** Our locked `Node` struct intentionally has no equivalent to C's deprecated `valueint` field (an `int`-truncated view of `value_double`). A grep of `tests/original/` confirms 6 direct references across `cjson_add.c`, `parse_number.c`, and `misc_tests.c`. Critically, `cjson_add.c` is one of the ~6 adapter-eligible files from §2. This means the eventual `#[repr(C)]` facade, if built, must synthesize a `valueint`-equivalent field (or accessor) at the C-ABI boundary to keep `cjson_add.c` linkable, even though the arena's internal `Node` never carries one.
 
 **In plain terms:** One of the original test files we're hoping to run unmodified checks an old, deprecated integer field that our clean internal design deliberately doesn't have. This isn't a problem yet but whoever builds the translation layer later needs to remember to add this field back in, just for outside compatibility, without polluting our actual internal node type.
+
+---
+
+## 9. Docker base image: `rust:slim-bookworm` builder, `debian:bookworm-slim` runtime
+
+**Decision:** The `Dockerfile` uses `rust:slim-bookworm` as the builder stage and `debian:bookworm-slim` as the runtime stage. The Rust channel is **not** pinned in the Dockerfile — `rJSON/rust-toolchain.toml` is the single source of truth for the channel, read automatically by the `rustup` already present in the base image. `build-essential` and `cmake` are installed in the builder stage proactively so future bench and fuzz C-compilation stages can reuse the cached layer without a rebuild.
+
+**Rationale:** `rust:slim-bookworm` is the official Rust Docker image on a stable Debian Bookworm slim base; it ships rustup and resolves the `rust-toolchain.toml` channel pin with no extra scaffolding. Pinning the channel in both the Dockerfile and `rust-toolchain.toml` would create a drift risk — a later channel bump in `rust-toolchain.toml` would silently be ignored by Docker unless the Dockerfile was also updated. Letting `rust-toolchain.toml` own the pin eliminates that class of inconsistency entirely.
+
+**In plain terms:** The Docker build uses the official Rust image on Debian. The Rust version comes from the `rust-toolchain.toml` file that already exists in the repo — we don't duplicate it in the Dockerfile, so there's no chance the two get out of sync later. We also pre-install the C compiler tools in the build stage now, so future Docker work (benchmarks, fuzz) doesn't have to wait for those to download from scratch.
