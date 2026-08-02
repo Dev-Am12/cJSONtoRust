@@ -1,0 +1,11 @@
+[
+  { "api": "orig_c", "file": "small.json", "size_bytes": 583, "iterations": 5000, "mean_us": 1.25, "median_us": 1.18, "min_us": 1.12, "max_us": 46.42, "std_dev_us": 0.81 },
+  { "api": "facade_rust", "file": "small.json", "size_bytes": 583, "iterations": 5000, "mean_us": 2.63, "median_us": 2.02, "min_us": 1.88, "max_us": 182.76, "std_dev_us": 3.18 },
+  { "api": "raw_rust", "file": "small.json", "size_bytes": 583, "iterations": 5000, "mean_us": 2.31, "median_us": 2.03, "min_us": 1.95, "max_us": 147.18, "std_dev_us": 3.44 },
+  { "api": "orig_c", "file": "medium.json", "size_bytes": 3464, "iterations": 5000, "mean_us": 7.87, "median_us": 7.00, "min_us": 6.76, "max_us": 212.69, "std_dev_us": 4.79 },
+  { "api": "facade_rust", "file": "medium.json", "size_bytes": 3464, "iterations": 5000, "mean_us": 11.49, "median_us": 10.32, "min_us": 9.85, "max_us": 682.46, "std_dev_us": 10.27 },
+  { "api": "raw_rust", "file": "medium.json", "size_bytes": 3464, "iterations": 5000, "mean_us": 11.72, "median_us": 10.91, "min_us": 10.44, "max_us": 152.42, "std_dev_us": 4.96 },
+  { "api": "orig_c", "file": "large.json", "size_bytes": 586893, "iterations": 200, "mean_us": 3113.16, "median_us": 2997.79, "min_us": 2836.78, "max_us": 4549.56, "std_dev_us": 325.99 },
+  { "api": "facade_rust", "file": "large.json", "size_bytes": 586893, "iterations": 200, "mean_us": 6005.96, "median_us": 5780.95, "min_us": 5230.33, "max_us": 10368.43, "std_dev_us": 705.33 },
+  { "api": "raw_rust", "file": "large.json", "size_bytes": 586893, "iterations": 200, "mean_us": 3973.93, "median_us": 3659.43, "min_us": 3261.55, "max_us": 8283.14, "std_dev_us": 850.30 }
+]

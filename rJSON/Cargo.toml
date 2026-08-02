@@ -8,3 +8,10 @@ libc = "0.2"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "raw_bench"
+harness = false

@@ -96,6 +96,12 @@ RUN set -eux; \
         LD_LIBRARY_PATH=../../target/debug ./out/${test}; \
     done
 
+# ---- Stage 1b: benchmark -------------------------------------
+FROM builder AS benchmark
+WORKDIR /build
+COPY bench/ ./bench/
+RUN bash bench/run_benchmarks.sh
+
 # ---- Stage 2: runtime ----------------------------------------
 FROM debian:bookworm-slim AS runtime
 
