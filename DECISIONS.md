@@ -128,4 +128,48 @@ Ownership during deletion follows the original's actual dual-flag rule precisely
 - **Honest total: 59 Tests passing, 13 failing (all 13 are `*_on_allocation_failure` tests)**
 
 **In plain terms:** When we hand a JSON tree to C, we convert it entirely into the C format — real pointer links, all fields filled in. C owns that memory and frees it itself via `cJSON_Delete`. Rust only gets involved again if C hands the pointer back to Print or Compare. `cJSON_InitHooks` does nothing in our port; the hook cannot reach the DLL's internal malloc. The 13 allocation-failure tests correctly report FAIL — honest per AI_GUARDRAILS §0.
+
+---
+
+## 12. cJSON_InitHooks: implemented for real; allocation-failure tests now pass
+
+**Decision (supersedes §11's no-op):** `cJSON_InitHooks` now stores the caller's `malloc_fn`/`free_fn` pair in two `static mut` globals (`GLOBAL_MALLOC_HOOK`, `GLOBAL_FREE_HOOK`). All C-heap allocations in the facade (`alloc_cjson`, `bytes_to_cstring_heap`) and all C-heap frees (`cJSON_Delete` and its callees) route through `cjson_malloc`/`cjson_free` helper functions that consult the hook first, falling back to `libc` when no hook is installed. Passing `NULL` to `cJSON_InitHooks` resets both to `None`. Arena-internal allocations (the Rust parser) are unaffected and cannot be redirected — this is a structural property of the arena design and is unchanged.
+
+**Rationale:** The original plan noted this as a known gap. After confirming via `hook_trace_msvc.exe` (§11) that the no-op cause is structural (DLL C-runtime isolation, not a fundamental impossibility), a targeted fix was identified: route only the *materialisation-layer* allocations through the hook. The arena never hands memory back to C, so hooking the materialisation layer covers all allocations that C callers observe. A single global hook slot matches original cJSON's documented non-thread-safe API contract.
+
+**Scope of coverage:** Every allocation the C caller can reach goes through the hook: `CJson` struct nodes, `valuestring` copies, `string`/key copies, and their corresponding frees in `cJSON_Delete`. The arena's internal allocations for parsing are not hooked — identical behaviour to how the original cJSON's `global_hooks` covers only the user-visible allocation layer, not its internal `parse_buffer` stack.
+
+**On thread safety:** None. Matches original cJSON. The globals are `static mut`; reading and writing them is `unsafe`. This is the only viable approach without a Mutex dependency, and `Mutex` would be a new crate dependency (AI_GUARDRAILS §4) that original cJSON does not require.
+
+**Test results after fix (MSVC x64, rjson.dll genuinely loaded):**
+- `cjson_add.c`: 31 Tests 0 Failures 0 Ignored ✓ (was: 18 pass / 13 fail)
+- All other 5 files: unchanged, still 0 failures
+- **Revised total: 72 Tests 0 Failures 0 Ignored**
+
+---
+
+## 13. Self-contained Docker build: Unity and fixtures vendored into adapter/
+
+**Decision:** `rJSON/tests/adapter/` now contains everything needed for a clean `git clone` + `docker build -t rjson .` with no external dependencies:
+- `unity/` — Unity v2.5 (MIT): `src/unity.c`, `src/unity.h`, `src/unity_internals.h`, `examples/unity_config.h`
+- `inputs/` — cJSON's own JSON test fixtures (MIT): `test1`–`test11` and their `.expected` counterparts, `test6` (intentionally invalid JSON)
+
+Both were previously only in the gitignored `/cJSON/` directory.
+
+**Dockerfile strategy:**
+1. `cargo build` + `cargo test` (Rust-side tests, all pass)
+2. `gcc -std=c11` compiles all 6 adapter `.c` files from `tests/adapter/` against the built `librjson.so` via `-L target/debug -lrjson`
+3. `ldd` verifies each binary genuinely links `librjson.so` (mirrors the Windows `dumpbin /IMPORTS` discipline)
+4. All 6 run from `WORKDIR /build/rJSON/tests/adapter` under `LD_LIBRARY_PATH` so `inputs/` relative paths resolve cleanly.
+
+**Results (Docker, gcc Linux x86-64, librjson.so genuinely linked):**
+- `minify_tests`: 7 Tests 0 Failures 0 Ignored ✓
+- `readme_examples`: 3 Tests 0 Failures 0 Ignored ✓
+- `parse_examples`: 15 Tests 0 Failures 0 Ignored ✓
+- `parse_with_opts`: 6 Tests 0 Failures 0 Ignored ✓
+- `compare_tests`: 10 Tests 0 Failures 0 Ignored ✓
+- `cjson_add`: 31 Tests 0 Failures 0 Ignored ✓
+- **Total: 72 Tests 0 Failures 0 Ignored across all 6 original test files**
+
+**In plain terms:** A teammate or judge who has never touched this repo can run `docker build -t rjson .` from a fresh clone and get a fully green build with the complete test suite verified against the Rust cdylib on Linux.
 
