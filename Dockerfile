@@ -100,13 +100,13 @@ RUN set -eux; \
 FROM builder AS benchmark
 WORKDIR /build
 COPY bench/ ./bench/
-RUN bash bench/run_benchmarks.sh
+RUN sed -i 's/\r$//' bench/*.sh && bash bench/run_benchmarks.sh
 
 # ---- Stage 1c: fuzzer ----------------------------------------
 FROM builder AS fuzzer
 WORKDIR /build
 COPY bench/ ./bench/
-RUN bash bench/run_differential_fuzz.sh
+RUN sed -i 's/\r$//' bench/*.sh && bash bench/run_differential_fuzz.sh
 
 # ---- Stage 2: runtime ----------------------------------------
 FROM debian:bookworm-slim AS runtime

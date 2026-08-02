@@ -1,2 +1,3 @@
 # Ensure test input fixtures maintain LF line endings without affecting repository-wide checkout behavior or kickoff hash files
 rJSON/tests/adapter/inputs/* text eol=lf
+bench/*.sh text eol=lf
