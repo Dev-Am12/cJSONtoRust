@@ -189,8 +189,31 @@ Ownership during deletion follows the original's actual dual-flag rule precisely
 
 **In plain terms:** Any tool that needs a bleeding-edge (nightly) Rust compiler — like the fuzzer, and likely future benchmarks — lives in its own self-contained mini-project instead of being folded into the main one. That way, the main project keeps using its normal, stable Rust version no matter what nightly-only tooling gets added alongside it.
 
+---
 
+## 18. `cJSON_InitHooks` now routes facade C-heap allocations; adapter total corrected to 72/72
 
+**Decision:** `cJSON_InitHooks` is implemented for the facade layer. The facade stores one process-global malloc hook and one process-global free hook, matching original cJSON's non-thread-safe global-hook model. Passing `NULL` resets both hooks to the default libc allocation path. All C-heap allocations owned by the facade (`CJson` structs and copied C strings used for `valuestring`/`string`) now go through the installed malloc hook, and all corresponding frees go through the installed free hook.
 
+This applies only to the C-compatible materialised tree at the facade boundary. The internal Rust arena continues to use Rust's normal allocator and is not redirected through cJSON hooks.
 
+**Failure handling:** Hook-driven allocation failure returns `NULL` cleanly. If materialising an arena tree into C structs fails partway through, the facade deletes the partial C tree already allocated in that call before returning `NULL`, so no partially-built C nodes or copied strings are left dangling.
 
+**Verification (Windows, MSVC x64, genuinely linked to `rjson.dll`):** Recompiled the adapter test binaries with `cl.exe` after running `VsDevCmd.bat -arch=x64 -host_arch=x64`. `dumpbin /IMPORTS rJSON\tests\adapter\out\cjson_add_msvc.exe` showed an explicit `rjson.dll` import containing the cJSON facade symbols, including `cJSON_InitHooks`.
+
+A standalone `hook_repro.c` first confirmed the hook mechanism in isolation: a failing malloc hook makes `cJSON_CreateIntArray` return `NULL`, and a counted mid-materialisation parse failure frees every successful hook allocation before returning `NULL`.
+
+Real adapter results from the six adapter-eligible original test files:
+
+- `minify_tests.c`: 7 Tests 0 Failures 0 Ignored
+- `readme_examples.c`: 3 Tests 0 Failures 0 Ignored
+- `parse_examples.c`: 15 Tests 0 Failures 0 Ignored
+- `parse_with_opts.c`: 6 Tests 0 Failures 0 Ignored
+- `compare_tests.c`: 10 Tests 0 Failures 0 Ignored
+- `cjson_add.c`: 31 Tests 0 Failures 0 Ignored
+
+**Corrected adapter total:** 72 Tests passing, 0 failing.
+
+**Historical note:** Entry #11's 59/72 finding was real and is not erased or rewritten. At that point, `cJSON_InitHooks` was genuinely a no-op in the Rust facade, and the 13 `*_on_allocation_failure` tests in `cjson_add.c` genuinely failed when tested against an MSVC x64 binary that imported `rjson.dll`. This entry records the later hook implementation that fixed those 13 failures.
+
+**In plain terms:** The fake earlier 72/72 result stayed corrected to 59/72 in entry #11. Now, after actually implementing the allocation hooks and verifying the binary really loads our Rust DLL, those remaining 13 allocation-failure tests pass for real, bringing the adapter-eligible original tests to 72/72.
