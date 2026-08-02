@@ -234,13 +234,27 @@ Both were previously only in the gitignored `/cJSON/` directory.
 3. `ldd` verifies each binary genuinely links `librjson.so` (mirrors the Windows `dumpbin /IMPORTS` discipline)
 4. All 6 run from `WORKDIR /build/rJSON/tests/adapter` under `LD_LIBRARY_PATH` so `inputs/` relative paths resolve cleanly.
 
-**Results (Docker, gcc Linux x86-64, librjson.so genuinely linked):**
+**Correction — Line-ending corruption under Docker on Windows:**
+Initial documentation claimed 72/72 tests passing immediately after vendoring. Under direct verification (`docker build --no-cache`), the build failed with **8 failures in `parse_examples` (64/72 passing, 8 failing)**. Every failure was identical: `Expected has \r\n, Was has \n`.
+
+*Investigation & Root Cause:* 
+1. `git ls-files --eol` confirmed that while Git stored fixture files as clean LF (`i/lf`), the repository lacked a `.gitattributes` file. Consequently, Git's default Windows configuration (`core.autocrlf=true`) silently checked out every test input and `.expected` file with CRLF (`\r\n`) in the local working directory.
+2. Because Docker builds directly copy the physical workspace directory (`COPY . /build`) rather than checking out directly from Git's database, Docker transferred those CRLF-corrupted working tree files into the Linux build container.
+3. In Linux, `parse_examples.c` opened `test1.expected` in `"rb"` mode and read literal `\r\n` characters directly from disk. Inspection of upstream `cJSON/cJSON.c` confirmed that original cJSON never outputs carriage returns; every formatting function emits plain line feeds (`'\n'`). Our Rust printer (`cJSON_Print`) was 100% accurate; the fixture files themselves had been corrupted by CRLF checkout conversion on Windows.
+
+*The Scoped Fix & Kickoff Hash Protection:* Created a root `.gitattributes` file strictly scoped to target **only** the vendored test inputs:
+```
+rJSON/tests/adapter/inputs/* text eol=lf
+```
+A blanket repository-wide line (`* text=auto eol=lf`) was deliberately avoided and removed during verification to ensure that kickoff-hashed verification directories (`rJSON/tests/original/` and `rJSON/tests/original-utils/`) retain their exact checkout behavior and continue to pass `sha256sum -c` checksum verification without alteration.
+
+**Results after scoped line-ending fix (Docker, gcc Linux x86-64, librjson.so genuinely linked):**
 - `minify_tests`: 7 Tests 0 Failures 0 Ignored ✓
 - `readme_examples`: 3 Tests 0 Failures 0 Ignored ✓
-- `parse_examples`: 15 Tests 0 Failures 0 Ignored ✓
+- `parse_examples`: 15 Tests 0 Failures 0 Ignored ✓ (was: 7 pass / 8 fail due to CRLF corruption)
 - `parse_with_opts`: 6 Tests 0 Failures 0 Ignored ✓
 - `compare_tests`: 10 Tests 0 Failures 0 Ignored ✓
 - `cjson_add`: 31 Tests 0 Failures 0 Ignored ✓
-- **Total: 72 Tests 0 Failures 0 Ignored across all 6 original test files**
+- **Genuinely verified total: 72 Tests 0 Failures 0 Ignored across all 6 original test files**
 
-**In plain terms:** A teammate or judge who has never touched this repo can run `docker build -t rjson .` from a fresh clone and get a fully green build with the complete test suite verified against the Rust cdylib on Linux.
+**In plain terms:** When we first tried running the self-contained Docker test from Windows, it failed 8 tests because Windows Git silently converted our test fixture files to have Windows-style line endings (`\r\n`), while our Rust library correctly outputs Linux-style line endings (`\n`, matching original C cJSON). We added a `.gitattributes` rule targeted strictly at the test fixtures folder so Git never modifies line endings on those files, while leaving the rest of the repository untouched so our original kickoff integrity checksums continue to verify cleanly. With that fixed, running `docker build -t rjson .` from a fresh clone gets a genuinely verified 72/72 green test pass against the Rust cdylib on Linux.
