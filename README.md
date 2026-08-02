@@ -54,7 +54,7 @@ Both should report every file as `OK`. If they don't, something in `tests/origin
 
 ## What this actually is
 
-[cJSON](https://github.com/DaveGamble/cJSON) is a ~3,500-line, ANSI C89 JSON library: a recursive-descent parser, a printer (with pretty, compact, buffered, and zero-allocation variants), and a mutable in-memory tree API for building and editing JSON documents by hand (add/delete/detach/replace/duplicate/compare). It's been in production use for over a decade and has a genuinely thorough test suite — which is exactly what made it a demanding, honest target for this hackathon's actual question: not "can you make something that compiles," but "can you make something that *behaves the same*."
+[cJSON](https://github.com/DaveGamble/cJSON) is a ~3,500-line, ANSI C89 JSON library: a recursive-descent parser, a printer (with pretty, compact, buffered, and zero-allocation variants), and a mutable in-memory tree API for building and editing JSON documents by hand (add/delete/detach/replace/duplicate/compare). It's been in production use for over a decade and has a genuinely thorough test suite which is exactly what made it a demanding, honest target for this hackathon's actual question: not "can you make something that compiles," but "can you make something that *behaves the same*."
 
 rJSON reimplements all of that from scratch in Rust. Its not a wrapper around an existing JSON crate, not a transpiler, nor an FFI shim into the original library. It's structured in two layers:
 
@@ -209,8 +209,6 @@ In the interest of the same honesty this whole document is trying to model:
 ---
 
 ## Team
-
-*[names/roles to be filled in]*
 
 - **[Maanas Chawan](https://github.com/MVC2408)** — parser
 - **[Ashutosh Mishra](https://github.com/Dev-Am12)** — data model, tree mutation, printer
