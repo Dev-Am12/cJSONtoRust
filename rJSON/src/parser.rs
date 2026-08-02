@@ -517,7 +517,26 @@ impl<'a> Parser<'a> {
         // the ASCII set matched above, so this is always valid UTF-8.
         let text = std::str::from_utf8(&candidate[..consumed])
             .expect("strtod_prefix_len only selects ASCII digit/sign/exponent bytes");
-        let value: f64 = text
+        
+        // Rust's `str::parse::<f64>()` does not accept a decimal point without
+        // fractional digits (e.g. "1." or "1.e2"), unlike C's `strtod` which
+        // treats them as "1.0" and "1.0e2".
+        // We normalize these cases to strictly valid Rust floats ("1", "1e2")
+        // without changing the numeric value, adapting to Rust's stricter
+        // float-literal grammar without changing the outcome.
+        let mut parse_text_buf;
+        let parse_text = if text.ends_with('.') {
+            &text[..text.len() - 1]
+        } else if let Some(idx) = text.find(".e").or_else(|| text.find(".E")) {
+            parse_text_buf = String::with_capacity(text.len() - 1);
+            parse_text_buf.push_str(&text[..idx]);
+            parse_text_buf.push_str(&text[idx + 1..]); // skip the dot
+            &parse_text_buf
+        } else {
+            text
+        };
+
+        let value: f64 = parse_text
             .parse()
             .expect("strtod_prefix_len only returns text matching strtod's grammar");
 
@@ -872,6 +891,13 @@ fn strtod_prefix_len(s: &[u8]) -> usize {
         }
         if frac_digits > 0 {
             i = j;
+        } else if int_digits > 0 {
+            // Trailing decimal point after integer digits (e.g. "1."):
+            // strtod consumes the dot and treats it as "1.0". Advance
+            // past the dot to match strtod's actual behavior -- upstream
+            // cJSON delegates to strtod unconditionally, so "1." is a
+            // valid number in upstream's grammar.
+            i = dot + 1;
         } else {
             // A lone '.' with no digits on either side isn't part of the
             // number (matches strtod rejecting bare "." and not
