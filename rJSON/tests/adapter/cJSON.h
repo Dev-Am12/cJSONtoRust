@@ -21,6 +21,8 @@ extern "C" {
 
 #include <stddef.h>
 #include <float.h>
+#include <stdbool.h>   /* required by MSVC in /std:c11 mode for true/false */
+
 
 /* cJSON type bits — identical to cJSON.h */
 #define cJSON_Invalid       (0)

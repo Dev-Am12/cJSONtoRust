@@ -103,19 +103,29 @@ Ownership during deletion follows the original's actual dual-flag rule precisely
 
 **Decision:** The `#[repr(C)]` facade layer (`rJSON/src/facade.rs`) uses the "materialise-on-return" approach: each `cJSON_Parse*` call creates a short-lived Rust `Arena`, parses into it via the existing Rust engine, then walks the arena tree to allocate a mirror image as C-heap `cJSON` structs with real `next`/`prev`/`child` pointer links, `valueint` synthesised from `value_double` via `clamped_int_value()`, and `valuestring`/`string` as `malloc`-allocated C strings. The arena is dropped before returning. `cJSON_Delete` on the C side walks and frees the C-heap structs; Rust is not involved. Functions that receive a `*const cJSON` back (e.g. `cJSON_Print`, `cJSON_Compare`) walk the C-struct tree and rebuild a temporary arena internally.
 
-**On `cJSON_InitHooks`:** Intentional no-op. Our allocator is Rust's arena (internal) + `libc::malloc` (materialisation). There is no clean way to thread a C custom allocator through the Rust engine. In practice, the `*_on_allocation_failure` tests in `cjson_add.c` still pass because the `failing_malloc` hook installed through `cJSON_InitHooks` does not intercept our `libc::malloc` calls inside the Rust DLL — both succeed independently. This is reported accurately: the hook does nothing in our port, but the observable test outcomes are the same (72/72 passing).
+**On `cJSON_InitHooks`:** Intentional no-op. Our allocator is Rust's arena (internal) + `libc::malloc` (materialisation). The 13 `*_on_allocation_failure` tests in `cjson_add.c` **fail** when genuinely tested against the Rust DLL — this is the correct, expected outcome per the original plan. See "Real test results" below.
 
 **Rationale:** This keeps `unsafe` code tightly bounded at the `extern "C"` boundary. There is no global mutable state beyond the single required `static mut GLOBAL_ERROR_PTR` for `cJSON_GetErrorPtr`. No new crate dependencies beyond `libc` (a thin FFI shim). `cJSON_Delete` is a straightforward `free`-walk with zero risk of double-free from Rust's side.
 
-**Adapter:** `rJSON/tests/adapter/` contains a `common.h` that shadows the original via include-path ordering, and a declaration-only `cJSON.h` derived from the read-only reference at `cJSON/cJSON.h`. The 6 adapter-eligible original test files compile against the Rust `cdylib` without modification.
+**Adapter — architecture correction (2026-08-02):** The initial adapter design used `-I rJSON/tests/adapter` to shadow the original `common.h`. This did not work: `#include "common.h"` in C uses quoted-include semantics, which searches the *source file's own directory first*, bypassing `-I` paths entirely. All six test files reside in `rJSON/tests/original/`, so they found `original/common.h` first, which `#include`s `../cJSON.c` (the C implementation). Additionally, the available GCC is MinGW 32-bit while our Rust DLL is MSVC x64; the 32-bit test binaries crashed on DLL load (`0xC000007B`). As a result the first run's 72/72 result was testing the original C implementation, not the Rust facade.
 
-**Results (run date: 2026-08-02):**
-- `minify_tests.c`: 7 Tests 0 Failures 0 Ignored
-- `readme_examples.c`: 3 Tests 0 Failures 0 Ignored
-- `parse_examples.c`: 15 Tests 0 Failures 0 Ignored
-- `parse_with_opts.c`: 6 Tests 0 Failures 0 Ignored
-- `compare_tests.c`: 10 Tests 0 Failures 0 Ignored
-- `cjson_add.c`: 31 Tests 0 Failures 0 Ignored
-- **Total: 72 Tests 0 Failures 0 Ignored**
+**Fix:** Test files are copied verbatim (no edits) to `rJSON/tests/adapter/`, making their "own directory" the adapter directory. Compiled with MSVC `cl.exe` x64 (matching DLL target). Import confirmed via `dumpbin /IMPORTS`.
 
-**In plain terms:** When we hand a JSON tree to C, we convert it entirely into the C format — real pointer links, all fields filled in. C owns that memory and frees it itself via `cJSON_Delete`. Rust only gets involved again if C hands the pointer back to Print or Compare. `cJSON_InitHooks` does nothing in our port because our allocator is separate from C's `malloc`, but every one of the 72 adapter tests passes anyway.
+**Hook interception proof (`hook_trace_msvc.exe`):** Direct evidence:
+- Q1: `cJSON_CreateIntArray` without hooks → NON-NULL (allocates correctly)
+- Q2: `cJSON_InitHooks(&failing_hooks)` → no-op (nothing printed)
+- Q3: `malloc(8)` in the *test binary's* process → NON-NULL (hook never affects it)
+- Q4: `cJSON_CreateIntArray` with failing hooks installed → NON-NULL (hook NOT intercepted — our `libc::malloc` in the DLL bypasses the hook entirely)
+- Conclusion: hook does not intercept DLL-internal malloc; `*_on_allocation_failure` tests correctly FAIL.
+
+**Real test results (MSVC x64, genuinely linked to rjson.dll):**
+- `minify_tests.c`: 7 Tests 0 Failures 0 Ignored ✓
+- `readme_examples.c`: 3 Tests 0 Failures 0 Ignored ✓
+- `parse_examples.c`: 15 Tests 0 Failures 0 Ignored ✓
+- `parse_with_opts.c`: 6 Tests 0 Failures 0 Ignored ✓
+- `compare_tests.c`: 10 Tests 0 Failures 0 Ignored ✓
+- `cjson_add.c`: 18 Tests 13 Failures 0 Ignored — 13 allocation-failure tests fail as designed
+- **Honest total: 59 Tests passing, 13 failing (all 13 are `*_on_allocation_failure` tests)**
+
+**In plain terms:** When we hand a JSON tree to C, we convert it entirely into the C format — real pointer links, all fields filled in. C owns that memory and frees it itself via `cJSON_Delete`. Rust only gets involved again if C hands the pointer back to Print or Compare. `cJSON_InitHooks` does nothing in our port; the hook cannot reach the DLL's internal malloc. The 13 allocation-failure tests correctly report FAIL — honest per AI_GUARDRAILS §0.
+
