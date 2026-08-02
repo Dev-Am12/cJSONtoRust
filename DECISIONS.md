@@ -128,4 +128,69 @@ Ownership during deletion follows the original's actual dual-flag rule precisely
 - **Honest total: 59 Tests passing, 13 failing (all 13 are `*_on_allocation_failure` tests)**
 
 **In plain terms:** When we hand a JSON tree to C, we convert it entirely into the C format — real pointer links, all fields filled in. C owns that memory and frees it itself via `cJSON_Delete`. Rust only gets involved again if C hands the pointer back to Print or Compare. `cJSON_InitHooks` does nothing in our port; the hook cannot reach the DLL's internal malloc. The 13 allocation-failure tests correctly report FAIL — honest per AI_GUARDRAILS §0.
-
+
+---
+
+## 12. Public parser entry points: `cjson_parse`, `cjson_parse_with_opts`, `cjson_parse_with_length_opts`
+
+**Decision:** The parser exposes exactly three public entry points, mirroring upstream's `cJSON_Parse`/`cJSON_ParseWithOpts`/`cJSON_ParseWithLengthOpts` subset relationship. Each returns `Result<(NodeId, usize), CJsonParseError>`, where the `usize` is the parse-end offset on success and `CJsonParseError { position: usize }` carries the same offset upstream would have exposed through both `return_parse_end` and `cJSON_GetErrorPtr` on failure. There is no global mutable error state anywhere in this API. `cjson_parse_with_opts` truncates its input at the first `0x00` byte before delegating to `cjson_parse_with_length_opts`, which is given the full slice and does not truncate at an embedded NUL. This mirrors upstream's real `strlen`-vs-explicit-length distinction and must be preserved as-is, not "fixed" into matching behavior.
+
+**Rationale:** These three functions are the parser's entire public contract. Any consumer of parsed trees — the eventual `#[repr(C)]` facade layer, the printer, benchmarks, and fuzzing — must call through them and cannot assume a hidden global error channel exists. Collapsing error and end-of-parse reporting into a single return value, rather than a stored global, keeps the parser thread-safe and side-effect-free by construction, while still giving the facade layer everything it needs to synthesize a C-ABI `cJSON_GetErrorPtr()`/`return_parse_end` at the boundary later.
+
+**In plain terms:** There are three ways to kick off a parse, matching the three original C functions. Each one hands back either the parsed tree plus where it stopped, or an error with a position number — never a hidden global you have to remember to check separately. One of the three functions stops reading at the first embedded NUL byte and the other two don't; that's intentional and matches the original library, so don't "fix" it into consistency.
+
+---
+
+## 13. Parsed string and object-key values are raw `Vec<u8>`, never validated UTF-8 or Rust `String`
+
+**Decision:** Every string value and object key produced by the parser is stored and passed around as raw bytes (`Vec<u8>`), copied through without any UTF-8 validation or lossy replacement. No parser code path ever constructs a Rust `String` or calls `str::from_utf8` on string content. Malformed or non-UTF-8 byte sequences inside a JSON string are preserved exactly as upstream cJSON's raw pointer-copy would preserve them.
+
+**Rationale:** Upstream cJSON has no concept of "invalid UTF-8" inside a string; it copies bytes verbatim. Converting to a validated Rust `String` (even via a lossy conversion) would silently replace malformed sequences with replacement characters, creating a real behavioral divergence from upstream. Any module that reads, compares, or prints string/key content — including the future printer, the facade layer, and `cJSON_Compare` — must treat these fields as opaque byte buffers rather than assuming they are valid UTF-8.
+
+**In plain terms:** Text values coming out of the parser aren't checked or "cleaned up" as valid text. They're kept as raw bytes, exactly like the original C library does. Anything built later that reads these values (printing, comparing, exposing them over FFI) needs to treat them as byte buffers, not assume they're always well-formed text.
+
+---
+
+## 14. Numeric overflow produces `f64::INFINITY`, not a parse error; printing must special-case it
+
+**Decision:** Extremely large numeric literals (for example, `1e400`) are accepted by the parser and stored with `value_double == f64::INFINITY`, matching upstream's unconditional acceptance of `HUGE_VAL` at parse time. The parser does not reject or clamp such values.
+
+**Rationale:** Upstream only converts an infinite/NaN `value_double` to the text `"null"` at print time, not at parse time. Rejecting overflow during parsing would therefore diverge from upstream behavior. Whoever implements the printer must reproduce the `isnan`/`isinf` → `"null"` special case, or numbers like `1e400` will round-trip incorrectly once printing exists.
+
+**In plain terms:** A huge number like `1e400` is allowed to parse successfully; it simply ends up stored as "infinity." The original library only turns that into the text `null` when printing it back out, not when reading it in. Whoever writes the printer needs to remember to add that same "infinity/NaN becomes null" rule, or big numbers won't round-trip correctly.
+
+---
+
+## 15. Object parsing permits duplicate keys; no lookup, rejection, or de-duplication occurs
+
+**Decision:** Object members are linked purely in encounter order during parsing. No key-lookup structure is consulted, and duplicate keys are neither detected nor rejected, matching upstream cJSON's `parse_object`, which performs no duplicate-key check either.
+
+**Rationale:** This is an intentional match of upstream behavior, not an oversight. Any future code that looks up object members by key (for example, a `cJSON_GetObjectItem` equivalent) must decide its own first-match/last-match policy over a member list that may legitimately contain duplicates. It cannot assume keys are unique.
+
+**In plain terms:** Objects can end up with the same key appearing more than once, just like in the original library, since nothing checks for or removes duplicates while parsing. Anything built later that looks things up by key needs to be written with that possibility in mind.
+
+---
+
+## 16. `valueint`-equivalent clamping is a single free function: `clamped_int_value`
+
+**Decision:** The saturating integer-truncation behavior of upstream's `valueint` field (referenced as a finding in Decision #8) is implemented as a pure free function, `clamped_int_value(value_double: f64) -> i32`, reproducing upstream's exact saturating comparison (`>=`/`<=` at `INT_MAX`/`INT_MIN`) rather than being stored as a field on `Node`.
+
+**Rationale:** `Node` intentionally carries no `valueint` field. Computing the clamped value on demand from `value_double` avoids adding that field prematurely while still giving every consumer — tests, and eventually the `#[repr(C)]` facade layer described in Decision #8 — a single, correct place to obtain this value. The facade layer should call this function rather than reimplementing the saturation logic a second time.
+
+**In plain terms:** There's one shared function that turns a stored floating-point number into the same clamped integer the original C library's `valueint` field would have held. It's computed on demand instead of being stored, and anything that needs a `valueint`-like value later should call this function instead of re-deriving the same logic.
+
+---
+
+## 17. Nightly-toolchain tooling sub-crates must be isolated as their own Cargo workspace
+
+**Decision:** Any sub-crate that requires a nightly Rust toolchain (the fuzzing harness today; future benchmarking or similar tooling) declares its own empty `[workspace]` table in its `Cargo.toml`, making it its own workspace root rather than a member of the root crate's workspace, and pins nightly only in its own `rust-toolchain.toml`.
+
+**Rationale:** The root crate is pinned to a stable channel via its own `rust-toolchain.toml`, and everyone builds against that pin. Without workspace isolation, a nightly-only sub-crate's toolchain file or dependencies could be silently pulled into a root `cargo build`/`cargo test` run. An isolated workspace guarantees the nightly requirement stays fully contained to the tooling that needs it.
+
+**In plain terms:** Any tool that needs a bleeding-edge (nightly) Rust compiler — like the fuzzer, and likely future benchmarks — lives in its own self-contained mini-project instead of being folded into the main one. That way, the main project keeps using its normal, stable Rust version no matter what nightly-only tooling gets added alongside it.
+
+
+
+
+
+
