@@ -61,16 +61,22 @@ pub struct CJson {
 }
 
 // ---------------------------------------------------------------------------
-// Global error pointer — one static mut, required for cJSON_GetErrorPtr
+// Global mutable facade state — matches original cJSON's non-thread-safe API
 // ---------------------------------------------------------------------------
 
 /// Last parse error position.  Invariant: null (no error) or a pointer into
 /// a C string buffer owned by the C caller, valid until the next parse call.
 ///
 /// SAFETY: original cJSON is not thread-safe; we match that assumption.
-/// This is the only required `static mut`; no thread-safe alternative exists
-/// without a new crate dependency (AI_GUARDRAILS §4).
 static mut GLOBAL_ERROR_PTR: *const c_char = std::ptr::null();
+
+/// Installed malloc hook for C-heap facade allocations, or None for libc.
+/// SAFETY: original cJSON stores hooks globally and is not thread-safe.
+static mut GLOBAL_MALLOC_HOOK: Option<unsafe extern "C" fn(usize) -> *mut libc::c_void> = None;
+
+/// Installed free hook for C-heap facade allocations, or None for libc.
+/// SAFETY: original cJSON stores hooks globally and is not thread-safe.
+static mut GLOBAL_FREE_HOOK: Option<unsafe extern "C" fn(*mut libc::c_void)> = None;
 
 // ---------------------------------------------------------------------------
 // Pure helper functions (safe Rust)
@@ -107,11 +113,40 @@ fn cjson_type_to_node_type(t: c_int) -> Option<NodeType> {
 // Low-level allocation helpers (all unsafe, all annotated)
 // ---------------------------------------------------------------------------
 
+/// Allocate through the currently installed cJSON hook, falling back to libc.
+/// SAFETY: caller must pass a valid allocation size and free via cjson_free.
+unsafe fn cjson_malloc(size: usize) -> *mut libc::c_void {
+    // SAFETY: reading the global hook is valid under cJSON's single-threaded contract.
+    if let Some(malloc_fn) = unsafe { GLOBAL_MALLOC_HOOK } {
+        // SAFETY: hook function pointer was installed by cJSON_InitHooks.
+        unsafe { malloc_fn(size) }
+    } else {
+        // SAFETY: libc malloc returns a valid allocation or null.
+        unsafe { libc::malloc(size) }
+    }
+}
+
+/// Free through the currently installed cJSON hook, falling back to libc.
+/// SAFETY: ptr must be null or allocated by the matching cJSON allocation path.
+unsafe fn cjson_free(ptr: *mut libc::c_void) {
+    if ptr.is_null() {
+        return;
+    }
+    // SAFETY: reading the global hook is valid under cJSON's single-threaded contract.
+    if let Some(free_fn) = unsafe { GLOBAL_FREE_HOOK } {
+        // SAFETY: hook function pointer was installed by cJSON_InitHooks.
+        unsafe { free_fn(ptr) };
+    } else {
+        // SAFETY: ptr was allocated by the default libc allocation path.
+        unsafe { libc::free(ptr) };
+    }
+}
+
 /// Allocate a zeroed CJson on the C heap.
 /// SAFETY: caller must eventually free via cJSON_Delete. Returns null on OOM.
 unsafe fn alloc_cjson() -> *mut CJson {
-    // SAFETY: malloc returns valid pointer or null; size is nonzero.
-    let ptr = unsafe { libc::malloc(std::mem::size_of::<CJson>()) as *mut CJson };
+    // SAFETY: cjson_malloc returns valid pointer or null; size is nonzero.
+    let ptr = unsafe { cjson_malloc(std::mem::size_of::<CJson>()) as *mut CJson };
     if !ptr.is_null() {
         // SAFETY: ptr is a freshly allocated block of the right size.
         unsafe { std::ptr::write_bytes(ptr, 0, 1) };
@@ -122,8 +157,8 @@ unsafe fn alloc_cjson() -> *mut CJson {
 /// Copy bytes into a NUL-terminated C string on the C heap.
 /// SAFETY: caller must eventually free the returned pointer.
 unsafe fn bytes_to_cstring_heap(bytes: &[u8]) -> *mut c_char {
-    // SAFETY: malloc returns valid pointer or null; len+1 is nonzero.
-    let ptr = unsafe { libc::malloc(bytes.len() + 1) as *mut c_char };
+    // SAFETY: cjson_malloc returns valid pointer or null; len+1 is nonzero.
+    let ptr = unsafe { cjson_malloc(bytes.len() + 1) as *mut c_char };
     if ptr.is_null() {
         return std::ptr::null_mut();
     }
@@ -150,14 +185,29 @@ unsafe fn arena_to_cjson(arena: &Arena, id: NodeId) -> *mut CJson {
 
     let valuestring_ptr = if let Some(vs) = &node.value_string {
         // SAFETY: bytes_to_cstring_heap allocates on C heap.
-        unsafe { bytes_to_cstring_heap(vs) }
+        let allocated = unsafe { bytes_to_cstring_heap(vs) };
+        if allocated.is_null() {
+            // SAFETY: ptr is the partially-built tree root for this call.
+            unsafe { cJSON_Delete(ptr) };
+            return std::ptr::null_mut();
+        }
+        allocated
     } else {
         std::ptr::null_mut()
     };
 
     let key_ptr = if let Some(k) = &node.key {
         // SAFETY: bytes_to_cstring_heap allocates on C heap.
-        unsafe { bytes_to_cstring_heap(k) }
+        let allocated = unsafe { bytes_to_cstring_heap(k) };
+        if allocated.is_null() {
+            // SAFETY: ptr owns valuestring_ptr if it was allocated above.
+            unsafe {
+                (*ptr).valuestring = valuestring_ptr;
+                cJSON_Delete(ptr);
+            }
+            return std::ptr::null_mut();
+        }
+        allocated
     } else {
         std::ptr::null_mut()
     };
@@ -175,6 +225,11 @@ unsafe fn arena_to_cjson(arena: &Arena, id: NodeId) -> *mut CJson {
     if let Some(child_id) = node.child {
         // SAFETY: child_id is a valid NodeId in this arena.
         let child_ptr = unsafe { arena_to_cjson(arena, child_id) };
+        if child_ptr.is_null() {
+            // SAFETY: ptr owns all fields allocated so far in this call.
+            unsafe { cJSON_Delete(ptr) };
+            return std::ptr::null_mut();
+        }
         // SAFETY: ptr is valid.
         unsafe { (*ptr).child = child_ptr };
 
@@ -183,6 +238,11 @@ unsafe fn arena_to_cjson(arena: &Arena, id: NodeId) -> *mut CJson {
         while let Some(sib_id) = cur_id {
             // SAFETY: sib_id is a valid NodeId in this arena.
             let sib_ptr = unsafe { arena_to_cjson(arena, sib_id) };
+            if sib_ptr.is_null() {
+                // SAFETY: ptr owns the already-linked child chain.
+                unsafe { cJSON_Delete(ptr) };
+                return std::ptr::null_mut();
+            }
             // SAFETY: prev_ptr and sib_ptr are valid CJson nodes we allocated.
             unsafe {
                 (*prev_ptr).next = sib_ptr;
@@ -431,16 +491,16 @@ pub unsafe extern "C" fn cJSON_Delete(item: *mut CJson) {
         let vs = unsafe { (*current).valuestring };
         if !vs.is_null() && (type_bits & 256 == 0) {
             // SAFETY: valuestring was malloc'd by bytes_to_cstring_heap.
-            unsafe { libc::free(vs as *mut libc::c_void) };
+            unsafe { cjson_free(vs as *mut libc::c_void) };
         }
         // Free string (key) unless StringIsConst flag is set
         let s = unsafe { (*current).string };
         if !s.is_null() && (type_bits & 512 == 0) {
             // SAFETY: string was malloc'd by bytes_to_cstring_heap.
-            unsafe { libc::free(s as *mut libc::c_void) };
+            unsafe { cjson_free(s as *mut libc::c_void) };
         }
-        // SAFETY: current was allocated by alloc_cjson (libc::malloc).
-        unsafe { libc::free(current as *mut libc::c_void) };
+        // SAFETY: current was allocated by alloc_cjson.
+        unsafe { cjson_free(current as *mut libc::c_void) };
         current = next;
     }
 }
@@ -610,7 +670,7 @@ pub unsafe extern "C" fn cJSON_CreateString(string: *const c_char) -> *mut CJson
     let vs = unsafe { bytes_to_cstring_heap(bytes) };
     if vs.is_null() {
         // SAFETY: ptr was allocated by make_leaf.
-        unsafe { libc::free(ptr as *mut libc::c_void) };
+        unsafe { cjson_free(ptr as *mut libc::c_void) };
         return std::ptr::null_mut();
     }
     // SAFETY: ptr is a valid CJson node.
@@ -718,7 +778,7 @@ pub unsafe extern "C" fn cJSON_Compare(
 }
 
 // ---------------------------------------------------------------------------
-// WAVE 2 — cJSON_InitHooks (intentional no-op, DECISIONS.md §11)
+// WAVE 2 — cJSON_InitHooks
 // ---------------------------------------------------------------------------
 
 /// cJSON_Hooks: mirrors cJSON.h's malloc_fn + free_fn pair.
@@ -728,17 +788,28 @@ pub struct CJsonHooks {
     pub free_fn: Option<unsafe extern "C" fn(*mut libc::c_void)>,
 }
 
-/// cJSON_InitHooks: intentional no-op (DECISIONS.md §11).
-///
-/// Our allocator is Rust's arena (internal) + libc::malloc (materialisation).
-/// Tests relying on a failing-malloc hook (cjson_add.c *_on_allocation_failure
-/// group) will fail — reported honestly per AI_GUARDRAILS §0.
+/// cJSON_InitHooks: install/reset malloc/free hooks for facade C-heap allocations.
 ///
 /// # Safety
 /// `hooks` may be null (documented reset behaviour in cJSON).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn cJSON_InitHooks(_hooks: *mut CJsonHooks) {
-    // Intentional no-op — see DECISIONS.md §11.
+pub unsafe extern "C" fn cJSON_InitHooks(hooks: *mut CJsonHooks) {
+    if hooks.is_null() {
+        // SAFETY: resetting global hooks matches original cJSON's single-threaded contract.
+        unsafe {
+            GLOBAL_MALLOC_HOOK = None;
+            GLOBAL_FREE_HOOK = None;
+        }
+        return;
+    }
+
+    // SAFETY: hooks is non-null and points to a cJSON_Hooks struct from caller.
+    let hooks_ref = unsafe { &*hooks };
+    // SAFETY: installing global hooks matches original cJSON's single-threaded contract.
+    unsafe {
+        GLOBAL_MALLOC_HOOK = hooks_ref.malloc_fn;
+        GLOBAL_FREE_HOOK = hooks_ref.free_fn;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -765,15 +836,15 @@ unsafe fn add_typed_to_object(
     let key_ptr = unsafe { bytes_to_cstring_heap(bytes) };
     if key_ptr.is_null() {
         // SAFETY: item was allocated by make_leaf.
-        unsafe { libc::free(item as *mut libc::c_void) };
+        unsafe { cjson_free(item as *mut libc::c_void) };
         return std::ptr::null_mut();
     }
     // SAFETY: object and item are valid CJson pointers.
     if !unsafe { append_to_parent(object, item, key_ptr) } {
         // SAFETY: key_ptr and item were malloc'd above.
         unsafe {
-            libc::free(key_ptr as *mut libc::c_void);
-            libc::free(item as *mut libc::c_void);
+            cjson_free(key_ptr as *mut libc::c_void);
+            cjson_free(item as *mut libc::c_void);
         }
         return std::ptr::null_mut();
     }
@@ -854,14 +925,15 @@ pub unsafe extern "C" fn cJSON_AddNumberToObject(
     let key_ptr = unsafe { bytes_to_cstring_heap(bytes) };
     if key_ptr.is_null() {
         // SAFETY: item was allocated by cJSON_CreateNumber.
-        unsafe { libc::free(item as *mut libc::c_void) };
+        unsafe { cjson_free(item as *mut libc::c_void) };
         return std::ptr::null_mut();
     }
     // SAFETY: object and item are valid CJson pointers.
     if !unsafe { append_to_parent(object, item, key_ptr) } {
+        // SAFETY: key_ptr and item were allocated by facade allocation helpers.
         unsafe {
-            libc::free(key_ptr as *mut libc::c_void);
-            libc::free(item as *mut libc::c_void);
+            cjson_free(key_ptr as *mut libc::c_void);
+            cjson_free(item as *mut libc::c_void);
         }
         return std::ptr::null_mut();
     }
@@ -897,8 +969,9 @@ pub unsafe extern "C" fn cJSON_AddStringToObject(
     }
     // SAFETY: object and item are valid CJson pointers.
     if !unsafe { append_to_parent(object, item, key_ptr) } {
+        // SAFETY: key_ptr and item were allocated by facade allocation helpers.
         unsafe {
-            libc::free(key_ptr as *mut libc::c_void);
+            cjson_free(key_ptr as *mut libc::c_void);
             cJSON_Delete(item);
         }
         return std::ptr::null_mut();
@@ -929,7 +1002,8 @@ pub unsafe extern "C" fn cJSON_AddRawToObject(
     // SAFETY: bytes_to_cstring_heap allocates on C heap.
     let vs = unsafe { bytes_to_cstring_heap(raw_bytes) };
     if vs.is_null() {
-        unsafe { libc::free(item as *mut libc::c_void) };
+        // SAFETY: item was allocated by make_leaf.
+        unsafe { cjson_free(item as *mut libc::c_void) };
         return std::ptr::null_mut();
     }
     // SAFETY: item is a valid CJson node.
@@ -944,8 +1018,9 @@ pub unsafe extern "C" fn cJSON_AddRawToObject(
     }
     // SAFETY: object and item are valid CJson pointers.
     if !unsafe { append_to_parent(object, item, key_ptr) } {
+        // SAFETY: key_ptr and item were allocated by facade allocation helpers.
         unsafe {
-            libc::free(key_ptr as *mut libc::c_void);
+            cjson_free(key_ptr as *mut libc::c_void);
             cJSON_Delete(item);
         }
         return std::ptr::null_mut();
