@@ -102,6 +102,12 @@ WORKDIR /build
 COPY bench/ ./bench/
 RUN bash bench/run_benchmarks.sh
 
+# ---- Stage 1c: fuzzer ----------------------------------------
+FROM builder AS fuzzer
+WORKDIR /build
+COPY bench/ ./bench/
+RUN bash bench/run_differential_fuzz.sh
+
 # ---- Stage 2: runtime ----------------------------------------
 FROM debian:bookworm-slim AS runtime
 

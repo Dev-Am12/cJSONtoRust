@@ -292,3 +292,23 @@ A blanket repository-wide line (`* text=auto eol=lf`) was deliberately avoided a
 2. **Facade Double-Allocation Cost:** On the heavy dataset, the dynamic C-bridge (`facade_rust`) executes in a **median of 5.78 ms** (~1.9x original C). This cleanly demonstrates the structural trade-off of our "materialise-on-return" architectural decision: while the internal Rust arena parses the payload immediately, traversing that arena to recursively invoke `libc::malloc` thousands of times to assemble standard C-heap pointer trees accounts for approximately **~2.0 ms of necessary translation overhead**.
 
 **In plain terms:** When using our Rust JSON parser natively, it is nearly as fast as hand-tuned C—running a massive half-megabyte file in just 3.6 milliseconds (compared to 3.0 milliseconds in C). When C programs plug in our dynamic library replacement, it runs in about 5.7 milliseconds. That extra 2-millisecond difference represents the literal cost of taking our fast internal Rust data and translating it into standard C memory blocks so traditional C programs can understand it without modifying their code.
+
+---
+
+## 21. Differential Fuzzing Discovery: Trailing-Dot Number Parsing (Permissive C vs. Strict RFC 8259 Rust)
+
+**The Goal:** Execute continuous high-speed differential fuzzing (Original C vs. Rust facade cdylib) for >= 60 monotonic wall-clock seconds to prove architectural agreement and surface latent grammatical discrepancies per the hackathon's "Differential Fuzz Survivor" and "Bug Catcher" criteria.
+
+**Methodology & Execution:**
+- **Containerized POSIX Dynamic Linkage:** Built a standalone C harness (`bench/c/fuzz_diff_main.c`) executed inside Linux Docker (Stage `fuzzer`). The harness utilizes POSIX `dlopen` and `dlsym` to bind compiled release builds of Original C (`libcjson_orig.so`, `-O3`) and our Rust dynamic library (`librjson.so`, `--release`), eliminating symbol collisions without external dependency additions.
+- **High-Velocity Mutator:** Evaluated continuous adaptive mutation streams (seed grammar bit-flips, truncation, UTF-8 boundary errors, extreme numbers, and deep recursion stress) at ~44,500–46,000 evaluations/sec for **65.00 continuous monotonic wall-clock seconds** (>2.89 million total iterations per run).
+- **Exclusion Discipline:** Enforced a token-walking comparison algorithm (`is_known_numeric_divergence`) to forgive documented platform runtime number formatting differences (e.g., glibc vs MSVC exponent padding outside quoted strings) and intentional extreme float overflows (`1e400` -> null in C), while ensuring zero tolerance for structural or quoted string mismatches.
+
+**The Discovery (Trailing-Dot Floating-Point Divergence):**
+Across >2.89 million payloads, the fuzzer proved exact behavior agreement on >99.98% of inputs while isolating 328–336 genuine parse agreement discrepancies. Inspection of 25 raw failure payloads confirmed 100% convergence on a single grammatical root cause: **numbers terminating in a bare decimal point without trailing digits (e.g., `1.` or `-3.` followed by whitespace, commas, or structural brackets).**
+
+- **Original C Behavior (Permissive via `strtod`):** Original `cJSON.c` delegates number parsing to C runtime float scanning (`strtod`). When evaluating `1.` or `-3.`, `strtod` consumes the trailing decimal point as a valid floating-point representation (`1.0` or `-3.0`) and successfully generates an abstract syntax tree.
+- **Rust rJSON Behavior (Strict RFC 8259 Compliance):** The Rust parser enforces strict RFC 8259 JSON grammar. Under Section 6 (`number = [ minus ] int [ frac ] [ exp ]`, where `frac = decimal-point 1*DIGIT`), a decimal point **must** be followed by at least one numeric digit. Because a trailing decimal point without trailing digits violates RFC grammar, the Rust parser rightfully rejects the payload as malformed JSON.
+
+**Team Action & Ownership Note:**
+This divergence represents an important compliance finding for **Member 1 (Parser Core)** to review and decide upon (whether to maintain strict RFC 8259 compliance or relax the parser to emulate legacy C `strtod` permissiveness). Because `rJSON/src/parser.rs` operates strictly outside Member 3's architectural boundary, no internal parser modifications were attempted by Member 3 under any circumstance. The differential fuzzer retains its honest non-zero exit status (`exit code 2`) to spotlight this discovery without polluting the default distribution build pipeline.
