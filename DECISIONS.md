@@ -217,3 +217,30 @@ Real adapter results from the six adapter-eligible original test files:
 **Historical note:** Entry #11's 59/72 finding was real and is not erased or rewritten. At that point, `cJSON_InitHooks` was genuinely a no-op in the Rust facade, and the 13 `*_on_allocation_failure` tests in `cjson_add.c` genuinely failed when tested against an MSVC x64 binary that imported `rjson.dll`. This entry records the later hook implementation that fixed those 13 failures.
 
 **In plain terms:** The fake earlier 72/72 result stayed corrected to 59/72 in entry #11. Now, after actually implementing the allocation hooks and verifying the binary really loads our Rust DLL, those remaining 13 allocation-failure tests pass for real, bringing the adapter-eligible original tests to 72/72.
+
+---
+
+## 19. Self-contained Docker build: Unity and fixtures vendored into adapter/
+
+**Decision:** `rJSON/tests/adapter/` now contains everything needed for a clean `git clone` + `docker build -t rjson .` with no external dependencies:
+- `unity/` — Unity v2.5 (MIT): `src/unity.c`, `src/unity.h`, `src/unity_internals.h`, `examples/unity_config.h`
+- `inputs/` — cJSON's own JSON test fixtures (MIT): `test1`–`test11` and their `.expected` counterparts, `test6` (intentionally invalid JSON)
+
+Both were previously only in the gitignored `/cJSON/` directory.
+
+**Dockerfile strategy:**
+1. `cargo build` + `cargo test` (Rust-side tests, all pass)
+2. `gcc -std=c11` compiles all 6 adapter `.c` files from `tests/adapter/` against the built `librjson.so` via `-L target/debug -lrjson`
+3. `ldd` verifies each binary genuinely links `librjson.so` (mirrors the Windows `dumpbin /IMPORTS` discipline)
+4. All 6 run from `WORKDIR /build/rJSON/tests/adapter` under `LD_LIBRARY_PATH` so `inputs/` relative paths resolve cleanly.
+
+**Results (Docker, gcc Linux x86-64, librjson.so genuinely linked):**
+- `minify_tests`: 7 Tests 0 Failures 0 Ignored ✓
+- `readme_examples`: 3 Tests 0 Failures 0 Ignored ✓
+- `parse_examples`: 15 Tests 0 Failures 0 Ignored ✓
+- `parse_with_opts`: 6 Tests 0 Failures 0 Ignored ✓
+- `compare_tests`: 10 Tests 0 Failures 0 Ignored ✓
+- `cjson_add`: 31 Tests 0 Failures 0 Ignored ✓
+- **Total: 72 Tests 0 Failures 0 Ignored across all 6 original test files**
+
+**In plain terms:** A teammate or judge who has never touched this repo can run `docker build -t rjson .` from a fresh clone and get a fully green build with the complete test suite verified against the Rust cdylib on Linux.
