@@ -25,7 +25,7 @@ Every non-trivial, non-mechanical divergence or architectural choice made during
 - [19. Self-contained Docker build: Unity and fixtures vendored into adapter/](#19-self-contained-docker-build-unity-and-fixtures-vendored-into-adapter)
 - [20. Dual A/B Benchmarking: Raw Rust Core vs. Facade-Wrapped C-Bridge vs. Original C](#20-dual-ab-benchmarking-raw-rust-core-vs-facade-wrapped-c-bridge-vs-original-c)
 - [21. Differential Fuzzing Established Parser Behavioral Parity with Upstream cJSON](#21-differential-fuzzing-established-parser-behavioral-parity-with-upstream-cjson)
-- [22. White-box test parity: assertion-level audit against the original test suite](#22-white-box-test-parity-assertion-level-audit-against-the-original-test-suite)
+- [22. White-Box Test Parity: Assertion-Level Audit Against The Original Test Suite](#22-white-box-test-parity-assertion-level-audit-against-the-original-test-suite)
 
 ---
 
@@ -245,7 +245,7 @@ A correction was required for line-ending corruption under Docker on Windows. In
 
 **In plain terms:** The fuzzer found that the original C library accepts numbers like `1.` because it relies on the C library's `strtod`, while the Rust parser originally rejected them because it followed the JSON specification more strictly. Instead of adding a one-off fix for that case, the parser was updated to behave like `strtod` in general. After the change, another differential fuzzing run compared roughly 2 million randomly generated inputs against the original library and found zero genuine behavioral differences, confirming that the parser now matches upstream `cJSON` much more closely.
 
-## 22. White-box test parity: assertion-level audit against the original test suite
+## 22. White-Box Test Parity: Assertion-Level Audit Against The Original Test Suite
 
 **Decision:** For the 12 original test files whose assertions test internal
 C statics with no Rust equivalent (see entry #2's zero-edit adapter
