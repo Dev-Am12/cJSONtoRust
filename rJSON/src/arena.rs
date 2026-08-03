@@ -72,8 +72,7 @@ pub fn minify(input: &[u8]) -> Vec<u8> {
             }
             b'/' if input.get(index + 1) == Some(&b'*') => {
                 index += 2;
-                while index + 1 < input.len()
-                    && !(input[index] == b'*' && input[index + 1] == b'/')
+                while index + 1 < input.len() && !(input[index] == b'*' && input[index + 1] == b'/')
                 {
                     index += 1;
                 }
@@ -874,24 +873,14 @@ impl Arena {
         self.print_value(id, false)
     }
 
-    pub fn print_buffered(
-        &self,
-        id: NodeId,
-        prebuffer: i32,
-        pretty: bool,
-    ) -> Option<Vec<u8>> {
+    pub fn print_buffered(&self, id: NodeId, prebuffer: i32, pretty: bool) -> Option<Vec<u8>> {
         if prebuffer < 0 {
             return None;
         }
         self.print_value(id, pretty)
     }
 
-    pub fn print_preallocated(
-        &self,
-        id: NodeId,
-        buffer: &mut [u8],
-        pretty: bool,
-    ) -> bool {
+    pub fn print_preallocated(&self, id: NodeId, buffer: &mut [u8], pretty: bool) -> bool {
         let Some(output) = self.print_value(id, pretty) else {
             return false;
         };

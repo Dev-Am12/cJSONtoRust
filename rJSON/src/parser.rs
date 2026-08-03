@@ -517,7 +517,7 @@ impl<'a> Parser<'a> {
         // the ASCII set matched above, so this is always valid UTF-8.
         let text = std::str::from_utf8(&candidate[..consumed])
             .expect("strtod_prefix_len only selects ASCII digit/sign/exponent bytes");
-        
+
         // Rust's `str::parse::<f64>()` does not accept a decimal point without
         // fractional digits (e.g. "1." or "1.e2"), unlike C's `strtod` which
         // treats them as "1.0" and "1.0e2".

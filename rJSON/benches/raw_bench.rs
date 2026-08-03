@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use rjson::{cjson_parse, Arena};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use rjson::{Arena, cjson_parse};
 use std::fs;
 use std::path::Path;
 

@@ -1,4 +1,4 @@
-use rjson::{cjson_parse, Arena};
+use rjson::{Arena, cjson_parse};
 use std::env;
 use std::fs;
 use std::hint::black_box;
@@ -50,23 +50,41 @@ fn main() {
         times_us[iterations / 2]
     };
 
-    let variance: f64 = times_us.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / iterations as f64;
+    let variance: f64 =
+        times_us.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / iterations as f64;
     let std_dev = variance.sqrt();
 
     println!(
         "{:<15} | File: {:<15} | Mean: {:8.2} us | Median: {:8.2} us | Min: {:8.2} us | Max: {:8.2} us | StdDev: {:6.2} us | Iters: {}",
         label,
-        std::path::Path::new(path).file_name().unwrap().to_str().unwrap(),
-        mean, median, min, max, std_dev, iterations
+        std::path::Path::new(path)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        mean,
+        median,
+        min,
+        max,
+        std_dev,
+        iterations
     );
 
     // Output raw structured JSON line for easy aggregation into bench/results.json
     println!(
         "{{\"api\": \"{}\", \"file\": \"{}\", \"size_bytes\": {}, \"iterations\": {}, \"mean_us\": {:.2}, \"median_us\": {:.2}, \"min_us\": {:.2}, \"max_us\": {:.2}, \"std_dev_us\": {:.2}}}",
         label,
-        std::path::Path::new(path).file_name().unwrap().to_str().unwrap(),
+        std::path::Path::new(path)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap(),
         payload.len(),
         iterations,
-        mean, median, min, max, std_dev
+        mean,
+        median,
+        min,
+        max,
+        std_dev
     );
 }

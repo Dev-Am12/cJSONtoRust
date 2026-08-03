@@ -13,8 +13,8 @@
 #   2. Runs the Rust-side port tests.
 #
 # What this deliberately does NOT do:
-#   - Link or run tests/original/ (requires the C-ABI facade —
-#     DECISIONS.md §3, hour-24 checkpoint, not yet built).
+#   - Link or run tests/original/ directly (those C tests are compiled against
+#     librjson.so via the self-contained Docker build or tests/adapter/).
 #   - Touch anything under rJSON/src/ or rJSON/tests/original*.
 #   - Fetch or modify /cJSON (intentionally gitignored, read-only).
 # ============================================================

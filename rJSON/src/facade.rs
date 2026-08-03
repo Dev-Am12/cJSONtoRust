@@ -23,7 +23,7 @@ use std::os::raw::{c_char, c_double, c_int};
 
 use crate::arena::{Arena, Node, NodeId, NodeType};
 use crate::parser::{
-    cjson_parse_with_length_opts, cjson_parse_with_opts, clamped_int_value, CJsonParseError,
+    CJsonParseError, cjson_parse_with_length_opts, cjson_parse_with_opts, clamped_int_value,
 };
 
 // ---------------------------------------------------------------------------
@@ -434,7 +434,13 @@ pub unsafe extern "C" fn cJSON_ParseWithLength(
 ) -> *mut CJson {
     if value.is_null() || buffer_length == 0 {
         // SAFETY: null/zero → failure at position 0.
-        unsafe { GLOBAL_ERROR_PTR = if value.is_null() { std::ptr::null() } else { value } };
+        unsafe {
+            GLOBAL_ERROR_PTR = if value.is_null() {
+                std::ptr::null()
+            } else {
+                value
+            }
+        };
         return std::ptr::null_mut();
     }
     // SAFETY: caller guarantees buffer_length readable bytes at value.
@@ -897,7 +903,11 @@ pub unsafe extern "C" fn cJSON_AddBoolToObject(
     name: *const c_char,
     boolean: c_int,
 ) -> *mut CJson {
-    let type_bits = if boolean != 0 { CJSON_TRUE } else { CJSON_FALSE };
+    let type_bits = if boolean != 0 {
+        CJSON_TRUE
+    } else {
+        CJSON_FALSE
+    };
     unsafe { add_typed_to_object(object, name, type_bits) }
 }
 
@@ -1061,10 +1071,7 @@ pub unsafe extern "C" fn cJSON_AddArrayToObject(
 /// # Safety
 /// `numbers` must point to at least `count` valid c_int values, or be null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn cJSON_CreateIntArray(
-    numbers: *const c_int,
-    count: c_int,
-) -> *mut CJson {
+pub unsafe extern "C" fn cJSON_CreateIntArray(numbers: *const c_int, count: c_int) -> *mut CJson {
     if numbers.is_null() || count <= 0 {
         return std::ptr::null_mut();
     }
@@ -1094,10 +1101,7 @@ pub unsafe extern "C" fn cJSON_CreateIntArray(
 /// # Safety
 /// `numbers` must point to at least `count` valid f32 values, or be null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn cJSON_CreateFloatArray(
-    numbers: *const f32,
-    count: c_int,
-) -> *mut CJson {
+pub unsafe extern "C" fn cJSON_CreateFloatArray(numbers: *const f32, count: c_int) -> *mut CJson {
     if numbers.is_null() || count <= 0 {
         return std::ptr::null_mut();
     }

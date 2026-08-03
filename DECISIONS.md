@@ -26,6 +26,7 @@ Every non-trivial, non-mechanical divergence or architectural choice made during
 - [20. Dual A/B Benchmarking: Raw Rust Core vs. Facade-Wrapped C-Bridge vs. Original C](#20-dual-ab-benchmarking-raw-rust-core-vs-facade-wrapped-c-bridge-vs-original-c)
 - [21. Differential Fuzzing Established Parser Behavioral Parity with Upstream cJSON](#21-differential-fuzzing-established-parser-behavioral-parity-with-upstream-cjson)
 - [22. White-Box Test Parity: Assertion-Level Audit Against The Original Test Suite](#22-white-box-test-parity-assertion-level-audit-against-the-original-test-suite)
+- [23. Dual-Tree Memory Trade-off: Temporary Arena Translation Over Direct C-Tree Construction](#23-dual-tree-memory-trade-off-temporary-arena-translation-over-direct-c-tree-construction)
 
 ---
 
@@ -283,3 +284,17 @@ half the files are fully covered, half have real, specifically-named
 gaps rather than vague ones. The biggest gap is `misc_tests.c`, which
 tests a wide grab-bag of internals we haven't built a single dedicated
 test file for yet.
+
+---
+
+## 23. Dual-Tree Memory Trade-off: Temporary Arena Translation Over Direct C-Tree Construction
+
+**Decision:** In our C-ABI facade layer (`rJSON/src/facade.rs`), parsing operations (`cJSON_Parse`, `cJSON_ParseWithOpts`, `cJSON_ParseWithLengthOpts`) execute a temporary dual-tree allocation lifecycle: an initial abstract syntax tree is constructed inside a safe Rust vector `Arena`, recursively walked to allocate a corresponding C-pointer struct tree on the system heap via `malloc`, and then immediately dropped. Conversely, formatting functions that accept a raw C struct pointer (such as `cJSON_Print`) execute an inverse dual-tree conversion: they traverse the raw C pointers via `cjson_to_arena` to instantiate a new temporary vector `Arena` solely for string formatting before dropping it upon completion. We intentionally accept this double-allocation lifecycle over direct C-tree construction in the core parser.
+
+**Rationale:** This architectural decision strictly decouples memory safety and parser logic from C-ABI memory layout requirements. By building temporary arenas first, the core tokenization and syntax parsing engine (`rJSON/src/parser.rs`) executes in 100% safe Rust without external system allocator calls or raw pointer manipulation per node, keeping all `unsafe` FFI translation bounded at the `extern "C"` boundary.
+
+Directly constructing C-compatible linked pointer trees (`*mut CJson`) during parsing was intentionally evaluated and rejected. Intertwining raw system heap allocations and pointer mutation throughout real-time token evaluation would force extensive `unsafe` code into the core parser. More critically, error recovery under direct C-tree construction is highly error-prone: if parsing fails halfway through a deeply nested payload (due to syntax errors, truncated input, or nesting depth limits), direct pointer construction leaves behind a complex, partially linked lattice of heap-allocated structs that requires intricate manual unwinding and cleanup routines on every abort path to prevent memory leaks. Under our temporary `Arena` design, error recovery is leak-proof and automatic: returning an error caused by invalid syntax simply drops the contiguous `Arena` vector out of scope, cleanly deallocating the Arena and all intermediate nodes automatically as it goes out of scope.
+
+This design preserves exact behavioral compatibility with upstream `cJSON`: legacy C applications receive authentic C-heap structs with real pointer linkages (`next`, `prev`, `child`, `valuestring`) that they own and can freely modify or terminate via `cJSON_Delete`. As quantified in our dual A/B benchmarking suite (see Decision #20), the temporary Arena-to-C translation introduces a measurable but acceptable C-ABI overhead compared to the native Rust parser. We consciously accept this localized performance cost in exchange for ironclad memory safety, leak-proof error recovery, clear separation between parser logic and FFI translation, and a significantly more maintainable implementation.
+
+**In plain terms:** When C programs ask us to parse JSON, we first safely read it into our fast Rust data structures, copy those structures into C-style memory pointers for the C program to use, and immediately clean up our temporary Rust copy. When C asks us to print JSON back out, we do the exact opposite: we read the C pointers into a temporary Rust structure to format the string, then discard the temporary copy. While building the C pointers directly during parsing would save a little time and memory, we deliberately chose not to do that because handling errors would become extremely complicated and dangerous—if a file was malformed halfway through, we would have to manually hunt down and free every half-built pointer to avoid memory leaks. Using temporary Rust copies means our parser stays 100% memory-safe and clean-up happens automatically on any error, which is well worth a tiny speed penalty when communicating with C.
