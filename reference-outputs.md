@@ -90,6 +90,25 @@ output:
 
 ---
 
+### print_number regression values
+
+Captured using the original unmodified cJSON.
+
+input: 0.123
+output: 0.123
+
+input: 123e+127
+output: 1.23e+129
+
+input: 123e-128
+output: 1.23e-126
+
+input: pi (3.141592653589793)
+output: 3.1415926535897931
+
+These values were used as the oracle for the Rust
+print_number regression tests.
+
 ## ⚠️ Platform-dependent behavior — exponent digit padding
 
 The above outputs for `5e-10` and `0.0000001` were captured on **Linux

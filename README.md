@@ -214,7 +214,7 @@ breakdown in `DECISIONS.md` #22.
 
 ## Team
 
-- **[Maanas Chawan](https://github.com/MVC2408)** — parser
+- **[Maanas Chawan](https://github.com/MVC2408)** — parser core, behavioral compatibility, regression testing & parser validation
 - **[Ashutosh Mishra](https://github.com/Dev-Am12)** — data model, tree mutation, printer
 - **[Shivam Kshirsagar](https://github.com/ShivammKshirsagar)** — C-ABI facade, build/adapter infrastructure, benchmarking, fuzzing
 
