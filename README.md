@@ -2,7 +2,7 @@
 
 **Port Mortem 2026 · Track A (C → Rust) · [DaveGamble/cJSON](https://github.com/DaveGamble/cJSON) v1.7.19**
 
-rJSON is a from-scratch Rust reimplementation of cJSON, a small, extremely widely-used ANSI C JSON parser/printer/tree-manipulation library. It ships as both an idiomatic native Rust crate and a drop-in, C-ABI-compatible shared library (`librjson.so`/`.dll`/`.dylib`) that the *original, unmodified* cJSON test suite can link against and pass.
+rJSON is a from-scratch Rust reimplementation of cJSON, a small, extremely widely-used ANSI C JSON parser/printer/tree-manipulation library. It ships as an idiomatic native Rust crate plus a C-ABI facade (`librjson.so`/`.dll`/`.dylib`) covering the API subset exercised by the six adapter-eligible original test files.
 
 This README is written for two audiences at once: judges evaluating this submission against the hackathon's scoring rubric, and anyone who wants to build, test, or use the port. If you only read one other document, read [`DECISIONS.md`](./DECISIONS.md) Every non-mechanical choice below is expanded there with full reasoning, including the mistakes we found and fixed along the way.
 
@@ -50,6 +50,12 @@ sha256sum -c tests-kickoff-utils.sha256    # cJSON_Utils test files (out-of-scop
 ```
 Both should report every file as `OK`. If they don't, something in `tests/original/` or `tests/original-utils/` has changed since kickoff.
 
+**Submission evidence:** [`STDLIB.md`](./STDLIB.md) records the C-to-Rust
+standard-library mappings; [`DEPENDENCY_PROOF.md`](./DEPENDENCY_PROOF.md)
+documents the dependency graph and its verification commands; and
+[`SUBMISSION_EVIDENCE.md`](./SUBMISSION_EVIDENCE.md) is the reproducible
+pre-submission checklist.
+
 ---
 
 ## What this actually is
@@ -59,7 +65,7 @@ Both should report every file as `OK`. If they don't, something in `tests/origin
 rJSON reimplements all of that from scratch in Rust. Its not a wrapper around an existing JSON crate, not a transpiler, nor an FFI shim into the original library. It's structured in two layers:
 
 1. **A safe, idiomatic Rust engine** — an arena-indexed tree, a recursive-descent parser, and a printer, none of which use `unsafe`.
-2. **A thin C-ABI facade** — `#[repr(C)]`, `extern "C"`, exporting the same public function signatures as `cJSON.h` — that lets C code (including the *original, byte-for-byte unmodified* cJSON test files) link against this library exactly as they would against the original.
+2. **A thin C-ABI facade** — `#[repr(C)]` and `extern "C"` bindings for the validated adapter surface that lets the six adapter-eligible, byte-for-byte unmodified cJSON test files link against this library.
 
 ---
 
