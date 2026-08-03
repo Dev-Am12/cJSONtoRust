@@ -1,8 +1,3 @@
-﻿
-Path                                    Hash                                                            
-----                                    ----                                                            
-tests\original-utils\json_patch_tests.c 98D1A1CB3CBD5888F2EE9D0ADF914FAAC8567754E586474C176FC69544B0DB4A
-tests\original-utils\misc_utils_tests.c 113C7941C8D57A46E0C52D235C3470409091C5F0A31FCF24058AD61975796F89
-tests\original-utils\old_utils_tests.c  9E7C421136876C66A0AE0D36E16D7ED16B1E2091E2C0CCA73EA15E1073CBE130
-
-
+98d1a1cb3cbd5888f2ee9d0adf914faac8567754e586474c176fc69544b0db4a *tests/original-utils/json_patch_tests.c
+113c7941c8d57a46e0c52d235c3470409091c5f0a31fcf24058ad61975796f89 *tests/original-utils/misc_utils_tests.c
+9e7c421136876c66a0ae0d36e16d7ed16b1e2091e2c0cca73ea15e1073cbe130 *tests/original-utils/old_utils_tests.c
