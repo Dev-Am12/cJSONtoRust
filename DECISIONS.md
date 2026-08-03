@@ -28,6 +28,7 @@ Every non-trivial, non-mechanical divergence or architectural choice made during
 - [22. White-Box Test Parity: Assertion-Level Audit Against The Original Test Suite](#22-white-box-test-parity-assertion-level-audit-against-the-original-test-suite)
 - [23. Dual-Tree Memory Trade-off: Temporary Arena Translation Over Direct C-Tree Construction](#23-dual-tree-memory-trade-off-temporary-arena-translation-over-direct-c-tree-construction)
 - [24. C-ABI allocation bindings use direct standard FFI declarations](#24-c-abi-allocation-bindings-use-direct-standard-ffi-declarations)
+- [25. Printer recursion depth limit is strict behavioral parity, not a divergence](#25-printer-recursion-depth-limit-is-strict-behavioral-parity-not-a-divergence)
 
 ---
 
@@ -319,3 +320,17 @@ collections and standard-library allocation.
 **In plain terms:** C callers still get normal C memory that their programs
 can free in the expected way, but the Rust project no longer needs an extra
 crate just to name those two C runtime functions.
+
+---
+
+## 25. Printer recursion depth limit is strict behavioral parity, not a divergence
+
+**Decision:** Our implementation of `CJSON_NESTING_LIMIT` (1000) enforcement within the recursive JSON formatting functions (`print_array_at` and `print_object_at`) is formally recognized as strict behavioral parity with upstream `cJSON`, replacing our earlier categorization of this check as an intentional divergent safety improvement.
+
+**Rationale:** During early porting and initial documentation, Decision #10 recorded that original `cJSON` enforced `CJSON_NESTING_LIMIT` solely during syntax parsing while leaving its recursive printer unguarded against stack exhaustion when printing programmatically constructed deep trees. Decision #10 accurately reflected our engineering team's understanding at that initial stage of development.
+
+However, subsequent repository-wide read-only verification against the authoritative upstream source code (`cJSON` v1.7.19, embedded at `bench/cjson/cJSON.c`) corrected this assumption. Upstream `cJSON.c` explicitly guards both `print_array()` (line 1606) and `print_object()` (line 1791) by checking `output_buffer->depth >= CJSON_NESTING_LIMIT` prior to recursive traversal, cleanly aborting formatting without a stack overflow if the depth threshold is exceeded.
+
+In accordance with our core project commitments to rigorous technical accuracy, complete transparency, and avoiding any exaggeration of port accomplishments, we record this verified finding as a formal clarification. Rather than retroactively editing history by modifying or deleting Decision #10, we preserve the chronological integrity of our engineering decision log. Our Rust printer's depth enforcement faithfully reproduces existing upstream safety semantics without divergent improvement.
+
+**In plain terms:** Early in the project (recorded in Decision #10), we believed the original C library only checked for overly deep nesting when reading JSON, and that trying to print a manually built, massively deep JSON tree would cause the original C code to crash with a stack overflow. We thought adding a depth guard to our printer was a brand-new safety enhancement. Later rigorous checks against the original C source code proved us wrong: the author of `cJSON` had already built that exact same safety guard into their printer. Instead of going back and erasing our past misinterpretation in Decision #10, we are documenting our corrected understanding right here to keep our engineering logs completely honest and transparent: our printer matches the original C library's existing safety behavior exactly.
