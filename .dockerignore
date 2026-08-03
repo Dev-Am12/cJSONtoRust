@@ -1,0 +1,9 @@
+@"
+target/
+rJSON/target/
+rJSON/fuzz/target/
+rJSON/tests/adapter/out/
+.git/
+*.exe
+*.obj
+"@ | Out-File -Encoding utf8 .dockerignore
