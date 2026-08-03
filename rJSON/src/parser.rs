@@ -524,17 +524,7 @@ impl<'a> Parser<'a> {
         // We normalize these cases to strictly valid Rust floats ("1", "1e2")
         // without changing the numeric value, adapting to Rust's stricter
         // float-literal grammar without changing the outcome.
-        let mut parse_text_buf;
-        let parse_text = if text.ends_with('.') {
-            &text[..text.len() - 1]
-        } else if let Some(idx) = text.find(".e").or_else(|| text.find(".E")) {
-            parse_text_buf = String::with_capacity(text.len() - 1);
-            parse_text_buf.push_str(&text[..idx]);
-            parse_text_buf.push_str(&text[idx + 1..]); // skip the dot
-            &parse_text_buf
-        } else {
-            text
-        };
+        let parse_text = text.strip_suffix('.').unwrap_or(text);
 
         let value: f64 = parse_text
             .parse()

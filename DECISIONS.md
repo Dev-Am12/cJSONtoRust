@@ -243,3 +243,42 @@ A correction was required for line-ending corruption under Docker on Windows. In
 **Rationale:** The project's primary objective is behavioral compatibility with upstream `cJSON`, not independent RFC interpretation. Differential fuzzing exposed a real compatibility difference that was invisible to the existing test suite. Matching the semantics of `strtod`, rather than introducing an isolated special case for trailing decimal literals, preserves compatibility for the broader class of numeric forms accepted by the original library while keeping parser offset advancement, token boundaries, and error reporting consistent with upstream behavior. Re-validating the implementation through sustained differential fuzzing provides confidence that the parser now reproduces `cJSON`'s externally observable behavior without introducing regressions.
 
 **In plain terms:** The fuzzer found that the original C library accepts numbers like `1.` because it relies on the C library's `strtod`, while the Rust parser originally rejected them because it followed the JSON specification more strictly. Instead of adding a one-off fix for that case, the parser was updated to behave like `strtod` in general. After the change, another differential fuzzing run compared roughly 2 million randomly generated inputs against the original library and found zero genuine behavioral differences, confirming that the parser now matches upstream `cJSON` much more closely.
+
+## 22. White-box test parity: assertion-level audit against the original test suite
+
+**Decision:** For the 12 original test files whose assertions test internal
+C statics with no Rust equivalent (see entry #2's zero-edit adapter
+strategy), we audited how thoroughly their behavioral intent is
+represented in `tests/port/`, rather than simply asserting coverage
+exists. Method: literal `TEST_ASSERT_*` call sites counted in each
+original file; literal `assert!`/`assert_eq!`/`assert_ne!` call sites
+counted in the corresponding port file(s), verified by reading content,
+not filename-matching alone.
+
+**Result:** 6 of 12 files have Full coverage (`parse_array.c`,
+`parse_hex4.c`, `parse_number.c`, `parse_object.c`, `parse_string.c`,
+`parse_value.c`). 6 have Partial coverage (`misc_tests.c`,
+`print_array.c`, `print_number.c`, `print_object.c`, `print_string.c`,
+`print_value.c`) — genuine, named gaps, not filler. None are fully
+Missing. Across all 12 originals: 290 literal assertions total. Across
+their unique corresponding port files: 349 literal assertions, 143
+`#[test]` functions (a port file can cover more ground than a 1:1
+assertion count implies, since many tests route through shared
+assertion helpers rather than inlining every check).
+
+`misc_tests.c` is the largest identified gap: no dedicated port file
+exists for it; its ~224 original assertions are only partially
+represented, distributed incidentally across other port files that
+happen to exercise related functionality. Remaining named gaps in
+`print_number.c` (specific values `0.123`, `1.23e+129`, `1.23e-126`,
+pi) were closed as a direct follow-up and independently verified
+against a from-scratch C oracle, not just re-run against the port
+itself.
+
+**In plain terms:** We checked, file by file and assertion by assertion,
+how much of the original's internal-only tests we'd actually managed
+to cover with new public-API tests, not just assumed we had. About
+half the files are fully covered, half have real, specifically-named
+gaps rather than vague ones. The biggest gap is `misc_tests.c`, which
+tests a wide grab-bag of internals we haven't built a single dedicated
+test file for yet.

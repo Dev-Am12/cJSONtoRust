@@ -134,8 +134,6 @@ fn parses_arrays_with_multiple_elements() {
     assert_eq!(actual, expected);
 }
 
-/// Mirrors `parse_array_should_not_parse_non_arrays`.
-
 /// Re-expression of `parse_array_should_not_parse_non_arrays`.
 ///
 /// The original C test called the internal `parse_array()` function,
@@ -202,7 +200,7 @@ fn rejects_arrays_nested_beyond_the_limit() {
 #[test]
 fn parses_arrays_nested_exactly_at_the_limit() {
     let mut json = vec![b'['; rjson::CJSON_NESTING_LIMIT];
-    json.extend(std::iter::repeat(b']').take(rjson::CJSON_NESTING_LIMIT));
+    json.extend(std::iter::repeat_n(b']', rjson::CJSON_NESTING_LIMIT));
     let mut arena = Arena::new();
     let mut parser = Parser::new(&json, &mut arena);
     assert!(parser.parse_value().is_ok());

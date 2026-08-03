@@ -44,7 +44,7 @@ fn main() {
     let mean = sum / iterations as f64;
     let min = times_us[0];
     let max = times_us[iterations - 1];
-    let median = if iterations % 2 == 0 {
+    let median = if iterations.is_multiple_of(2) {
         (times_us[iterations / 2 - 1] + times_us[iterations / 2]) / 2.0
     } else {
         times_us[iterations / 2]

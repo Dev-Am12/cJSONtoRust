@@ -149,9 +149,8 @@ fn every_truncation_prefix_of_a_valid_document_does_not_panic() {
 
 #[test]
 fn nesting_exactly_at_limit_parses_without_panic() {
-    let input: Vec<u8> = std::iter::repeat(b'[')
-        .take(1000)
-        .chain(std::iter::repeat(b']').take(1000))
+    let input: Vec<u8> = std::iter::repeat_n(b'[', 1000)
+        .chain(std::iter::repeat_n(b']', 1000))
         .collect();
     assert_no_panic("nesting exactly at CJSON_NESTING_LIMIT", || {
         let mut arena = Arena::new();
@@ -161,7 +160,7 @@ fn nesting_exactly_at_limit_parses_without_panic() {
 
 #[test]
 fn nesting_one_past_limit_fails_gracefully_not_panic() {
-    let input: Vec<u8> = std::iter::repeat(b'[').take(1001).collect();
+    let input: Vec<u8> = std::iter::repeat_n(b'[', 1001).collect();
     let mut arena = Arena::new();
     let mut is_ok = None;
     assert_no_panic("nesting one past CJSON_NESTING_LIMIT", || {
@@ -180,7 +179,7 @@ fn extreme_nesting_far_past_limit_fails_gracefully_not_panic() {
     // recursion-depth or stack-overflow-shaped panic that only a much
     // deeper input would trigger, since the nesting check itself bails
     // out at 1000 long before this depth is reached.
-    let input: Vec<u8> = std::iter::repeat(b'[').take(100_000).collect();
+    let input: Vec<u8> = std::iter::repeat_n(b'[', 100_000).collect();
     assert_no_panic("100,000 unclosed '[' characters", || {
         let mut arena = Arena::new();
         let _ = cjson_parse(&mut arena, &input);
@@ -194,9 +193,7 @@ fn deeply_nested_object_over_limit_fails_gracefully_not_panic() {
         input.extend_from_slice(b"{\"a\":");
     }
     input.push(b'1');
-    for _ in 0..1200 {
-        input.push(b'}');
-    }
+    input.extend(std::iter::repeat_n(b'}', 1200));
     assert_no_panic("1200-deep nested object", || {
         let mut arena = Arena::new();
         let _ = cjson_parse(&mut arena, &input);
@@ -209,9 +206,8 @@ fn deleting_a_deeply_nested_parsed_tree_does_not_panic() {
     // (DECISIONS.md #6) on the deepest tree the parser will actually
     // accept (nesting limit - 1), since deletion recursion depth is a
     // distinct risk from parse recursion depth.
-    let input: Vec<u8> = std::iter::repeat(b'[')
-        .take(999)
-        .chain(std::iter::repeat(b']').take(999))
+    let input: Vec<u8> = std::iter::repeat_n(b'[', 999)
+        .chain(std::iter::repeat_n(b']', 999))
         .collect();
     assert_no_panic("deleting a 999-deep parsed array", || {
         let mut arena = Arena::new();
@@ -228,7 +224,7 @@ fn deleting_a_deeply_nested_parsed_tree_does_not_panic() {
 #[test]
 fn massive_digit_run_does_not_panic() {
     let mut input = vec![b'1'];
-    input.extend(std::iter::repeat(b'2').take(5000));
+    input.extend(std::iter::repeat_n(b'2', 5000));
     assert_no_panic("5001-digit integer literal", || {
         let mut arena = Arena::new();
         let _ = cjson_parse(&mut arena, &input);
@@ -238,7 +234,7 @@ fn massive_digit_run_does_not_panic() {
 #[test]
 fn massive_exponent_does_not_panic() {
     let mut input = b"1e".to_vec();
-    input.extend(std::iter::repeat(b'9').take(3000));
+    input.extend(std::iter::repeat_n(b'9', 3000));
     assert_no_panic("1e followed by 3000 nines", || {
         let mut arena = Arena::new();
         let _ = cjson_parse(&mut arena, &input);
@@ -248,9 +244,9 @@ fn massive_exponent_does_not_panic() {
 #[test]
 fn massive_negative_decimal_does_not_panic() {
     let mut input = vec![b'-'];
-    input.extend(std::iter::repeat(b'9').take(4000));
+    input.extend(std::iter::repeat_n(b'9', 4000));
     input.push(b'.');
-    input.extend(std::iter::repeat(b'1').take(4000));
+    input.extend(std::iter::repeat_n(b'1', 4000));
     assert_no_panic("massive negative decimal", || {
         let mut arena = Arena::new();
         let _ = cjson_parse(&mut arena, &input);

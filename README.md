@@ -201,7 +201,10 @@ Dockerfile, build.sh, build.ps1
 In the interest of the same honesty this whole document is trying to model:
 
 - **Differential fuzzing** — a Rust-only crash fuzzer exists (`fuzz/fuzz_targets/fuzz_parse.rs`); a true differential harness comparing original-vs-port output on shared input is in active development and not yet complete.
-- **White-box test parity table** — the underlying re-expressed tests exist; the formal file-by-file assertion-count mapping documenting them is not yet written up.
+**White-box parity**: 6 of 12 original internal-test files have full
+behavioral-intent coverage in `tests/port/`, 6 have partial coverage
+with named, specific gaps (`misc_tests.c` is the largest). Full
+breakdown in `DECISIONS.md` #22.
 - **Two small cleanup items**: `append_child` is currently `pub` rather than `pub(crate)` (it's only ever called through validated public entry points today, but its visibility doesn't yet reflect that), and `cargo fmt --check` currently reports formatting differences not yet applied.
 - **Performance** — see [Benchmarks](#benchmarks) above; optimization work is planned before submission.
 - **`cJSON_Utils`** (JSON Pointer/Patch/Merge Patch) is out of scope by design (see `DECISIONS.md` #1), tests preserved unmodified in case it's promoted to a stretch goal.

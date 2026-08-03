@@ -53,3 +53,16 @@ fn small_magnitude_numbers_use_two_digit_signed_exponents() {
     assert_eq!(number(&mut arena, 5e-10), "5e-10");
     assert_eq!(number(&mut arena, 1e300), "1e+300");
 }
+
+#[test]
+fn matches_original_positive_real_print_number_cases() {
+    let mut arena = Arena::new();
+    let pi = "3.1415926535897931"
+        .parse::<f64>()
+        .expect("original print_number literal parses as f64");
+
+    assert_eq!(number(&mut arena, 0.123), "0.123");
+    assert_eq!(number(&mut arena, 123e+127), "1.23e+129");
+    assert_eq!(number(&mut arena, 123e-128), "1.23e-126");
+    assert_eq!(number(&mut arena, pi), "3.1415926535897931");
+}
