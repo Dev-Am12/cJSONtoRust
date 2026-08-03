@@ -182,11 +182,12 @@ rJSON/
 |   +-- adapter/             -- untouched copies + alternate common.h/cJSON.h, vendored
 |   |                            Unity framework + fixtures, for the 6 adapter-eligible files
 |   +-- *.rs                  -- new Rust tests, including white-box behavioral re-expression
-+-- fuzz/                    -- libFuzzer crash-fuzzing target (differential fuzzer in progress)
++-- fuzz/                    -- crate-level libFuzzer crash-fuzzing target
 +-- benches/, bin/raw_timing.rs -- benchmark harness
 +-- tests-kickoff.sha256, tests-kickoff-utils.sha256
 +-- rust-toolchain.toml
-bench/                        -- cross-language benchmark harness (C + Rust)
+bench/                        -- cross-language benchmark harness and POSIX differential fuzzer engine
+fuzz/                         -- root anatomy differential fuzzer proxy (harness.c and log.txt proof)
 DECISIONS.md                   -- every non-trivial decision, with rationale
 AI_GUARDRAILS.md                -- standing rules given to AI coding agents on this project
 reference-outputs.md             -- captured ground-truth C behavior used throughout porting
@@ -200,8 +201,8 @@ Dockerfile, build.sh, build.ps1
 
 In the interest of the same honesty this whole document is trying to model:
 
-- **Differential fuzzing** — a Rust-only crash fuzzer exists (`fuzz/fuzz_targets/fuzz_parse.rs`); a true differential harness comparing original-vs-port output on shared input is in active development and not yet complete.
-**White-box parity**: 6 of 12 original internal-test files have full
+- **Differential fuzzing completed** — a crate-level crash fuzzer exists (`rJSON/fuzz/fuzz_targets/fuzz_parse.rs`), alongside a complete root-level continuous differential fuzzer (`fuzz/harness.c` / `bench/c/fuzz_diff_main.c`) comparing Original C vs `librjson.so` over 65+ second monotonic runs (`fuzz/log.txt`), which surfaced an authentic trailing-dot grammar boundary divergence documented in `DECISIONS.md` #21.
+- **White-box parity**: 6 of 12 original internal-test files have full
 behavioral-intent coverage in `tests/port/`, 6 have partial coverage
 with named, specific gaps (`misc_tests.c` is the largest). Full
 breakdown in `DECISIONS.md` #22.

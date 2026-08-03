@@ -1,3 +1,9 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 199309L
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -112,11 +118,33 @@ static bool is_known_overflow_divergence(const char *raw_buf) {
             strstr(raw_buf, "1e+300") || strstr(raw_buf, "1E+300"));
 }
 
-static double get_elapsed(struct timespec *start) {
+#ifdef _WIN32
+typedef clock_t mono_time_t;
+static mono_time_t get_mono_now(void) {
+    return clock();
+}
+static double get_elapsed(const mono_time_t *start) {
+    return (double)(clock() - *start) / (double)CLOCKS_PER_SEC;
+}
+static uint64_t get_seed_val(void) {
+    return (uint64_t)clock() ^ ((uint64_t)time(NULL) << 16);
+}
+#else
+typedef struct timespec mono_time_t;
+static mono_time_t get_mono_now(void) {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
+    return now;
+}
+static double get_elapsed(const mono_time_t *start) {
+    struct timespec now = get_mono_now();
     return (now.tv_sec - start->tv_sec) + (now.tv_nsec - start->tv_nsec) / 1e9;
 }
+static uint64_t get_seed_val(void) {
+    struct timespec ts = get_mono_now();
+    return ((uint64_t)ts.tv_sec ^ ((uint64_t)ts.tv_nsec << 16));
+}
+#endif
 
 /* PRNG helper: xorshift64 */
 static uint64_t rng_state = 88172645463325252ULL;
@@ -233,15 +261,12 @@ int main(void) {
     }
     printf("[Init] Successfully dynamic-loaded both Original C and Rust release libraries.\n");
 
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    rng_state = ((uint64_t)ts.tv_sec ^ ((uint64_t)ts.tv_nsec << 16)) | 1;
+    rng_state = get_seed_val() | 1;
     printf("[Init] PRNG Seeded with Monotonic Time: 0x%016llX\n", (unsigned long long)rng_state);
     printf("[Init] Commencing 65+ second differential fuzz loop...\n\n");
     fflush(stdout);
 
-    struct timespec start_time;
-    clock_gettime(CLOCK_MONOTONIC, &start_time);
+    mono_time_t start_time = get_mono_now();
 
     uint64_t iterations = 0;
     uint64_t agreement_success = 0;
