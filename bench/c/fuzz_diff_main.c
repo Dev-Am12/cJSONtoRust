@@ -63,60 +63,6 @@ static void close_api(CJsonAPI *api) {
     if (api->handle) dlclose(api->handle);
 }
 
-static inline bool is_num_char(char c) {
-    return (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E';
-}
-
-/* 
- * EXCLUSION FILTER 1: Numeric Formatting Relaxation Outside Quotes
- */
-static bool is_known_numeric_divergence(const char *orig_s, const char *rust_s) {
-    if (!orig_s || !rust_s) return false;
-    if (strcmp(orig_s, rust_s) == 0) return true;
-
-    const char *p1 = orig_s;
-    const char *p2 = rust_s;
-    bool in_string = false;
-    bool escape = false;
-
-    while (*p1 != '\0' && *p2 != '\0') {
-        if (*p1 == '"' && !escape) {
-            in_string = !in_string;
-        }
-        escape = (*p1 == '\\' && !escape);
-
-        if (!in_string && (is_num_char(*p1) || is_num_char(*p2))) {
-            if (!is_num_char(*p1) || !is_num_char(*p2)) {
-                return false; 
-            }
-            while (*p1 != '\0' && is_num_char(*p1)) p1++;
-            while (*p2 != '\0' && is_num_char(*p2)) p2++;
-            continue;
-        }
-
-        if (*p1 == *p2) {
-            p1++;
-            p2++;
-            continue;
-        }
-
-        return false;
-    }
-
-    return (*p1 == '\0' && *p2 == '\0');
-}
-
-/* 
- * EXCLUSION FILTER 2: Parse Agreement Relaxation (Float Overflow Case)
- * ONLY applied when orig_root==NULL vs rust_root!=NULL (or vice-versa).
- */
-static bool is_known_overflow_divergence(const char *raw_buf) {
-    if (!raw_buf) return false;
-    return (strstr(raw_buf, "e300") || strstr(raw_buf, "E300") || 
-            strstr(raw_buf, "e400") || strstr(raw_buf, "E400") || 
-            strstr(raw_buf, "1e-300") || strstr(raw_buf, "-1e-300") ||
-            strstr(raw_buf, "1e+300") || strstr(raw_buf, "1E+300"));
-}
 
 #ifdef _WIN32
 typedef clock_t mono_time_t;
@@ -229,23 +175,6 @@ int main(void) {
     printf("rJSON Differential Fuzzer (Original C vs Librjson.so)\n");
     printf("Target Continuous Execution: >= 65.0 Seconds (Monotonic Clock)\n");
     printf("============================================================\n\n");
-
-    /* PROOF OF EXCLUSION FILTER ENGAGEMENT */
-    printf("------------------------------------------------------------\n");
-    printf("[Filter Engagement Proof] Verifying exclusion filter against known formatting divergence:\n");
-    const char *sim_orig = "{\"num\":\t5e-007,\t\"valid\":\ttrue}";
-    const char *sim_rust = "{\"num\":\t5e-07,\t\"valid\":\ttrue}";
-    bool engage_res = is_known_numeric_divergence(sim_orig, sim_rust);
-    printf("  Orig String: %s\n", sim_orig);
-    printf("  Rust String: %s\n", sim_rust);
-    printf("  is_known_numeric_divergence result: %s (Filter proved to exclude numeric format divergence)\n",
-           engage_res ? "TRUE (ENGAGED)" : "FALSE (FAILED)");
-    printf("------------------------------------------------------------\n\n");
-    if (!engage_res) {
-        fprintf(stderr, "[FATAL] Exclusion filter verification failed!\n");
-        return 1;
-    }
-
     CJsonAPI orig_api = {0};
     CJsonAPI rust_api = {0};
 
@@ -271,8 +200,6 @@ int main(void) {
     uint64_t iterations = 0;
     uint64_t agreement_success = 0;
     uint64_t agreement_rejection = 0;
-    uint64_t ignored_overflow = 0;
-    uint64_t ignored_numeric_format = 0;
     uint64_t authentic_bugs = 0;
     double last_heartbeat = 0.0;
     double elapsed = 0.0;
@@ -287,16 +214,12 @@ int main(void) {
 
         if ((orig_root == NULL) != (rust_root == NULL)) {
             /* Parse Agreement Divergence */
-            if (is_known_overflow_divergence(buf)) {
-                ignored_overflow++;
-            } else {
-                authentic_bugs++;
-                if (authentic_bugs <= 25) {
-                    printf("\n[AUTHENTIC BUG ALARM #%llu: Parse Agreement Discrepancy]\n", (unsigned long long)authentic_bugs);
-                    printf("  Orig Root: %p | Rust Root: %p\n", (void*)orig_root, (void*)rust_root);
-                    printf("  Input Payload (%zu bytes): %s\n", strlen(buf), buf);
-                    fflush(stdout);
-                }
+            authentic_bugs++;
+            if (authentic_bugs <= 25) {
+                printf("\n[AUTHENTIC BUG ALARM #%llu: Parse Agreement Discrepancy]\n", (unsigned long long)authentic_bugs);
+                printf("  Orig Root: %p | Rust Root: %p\n", (void*)orig_root, (void*)rust_root);
+                printf("  Input Payload (%zu bytes): %s\n", strlen(buf), buf);
+                fflush(stdout);
             }
         } else if (orig_root != NULL && rust_root != NULL) {
             /* Both parsed successfully -> Evaluate Structural & Content Equivalence via cJSON_Print */
@@ -308,17 +231,13 @@ int main(void) {
                 authentic_bugs++;
                 printf("\n[AUTHENTIC BUG ALARM #%llu: Null Print Result on Valid Parse]\n", (unsigned long long)authentic_bugs);
             } else if (strcmp(orig_str, rust_str) != 0) {
-                if (is_known_numeric_divergence(orig_str, rust_str)) {
-                    ignored_numeric_format++;
-                } else {
-                    authentic_bugs++;
-                    if (authentic_bugs <= 25) {
-                        printf("\n[AUTHENTIC BUG ALARM #%llu: Structural / Content Discrepancy]\n", (unsigned long long)authentic_bugs);
-                        printf("  Orig Print: %s\n", orig_str);
-                        printf("  Rust Print: %s\n", rust_str);
-                        printf("  Raw Input:  %s\n", buf);
-                        fflush(stdout);
-                    }
+                authentic_bugs++;
+                if (authentic_bugs <= 25) {
+                    printf("\n[AUTHENTIC BUG ALARM #%llu: Structural / Content Discrepancy]\n", (unsigned long long)authentic_bugs);
+                    printf("  Orig Print: %s\n", orig_str);
+                    printf("  Rust Print: %s\n", rust_str);
+                    printf("  Raw Input:  %s\n", buf);
+                    fflush(stdout);
                 }
             }
 
@@ -349,11 +268,9 @@ int main(void) {
     printf("------------------------------------------------------------\n");
     printf("Successful Parse Agreements:        %llu\n", (unsigned long long)agreement_success);
     printf("Malformed Rejection Agreements:     %llu\n", (unsigned long long)agreement_rejection);
-    printf("Ignored Known Divergences:\n");
-    printf("  - Numeric Formatting (Outside Q): %llu\n", (unsigned long long)ignored_numeric_format);
-    printf("  - Float Overflow (Parse Diff):    %llu\n", (unsigned long long)ignored_overflow);
+    printf("Exclusion Filters Active:           0 (Zero Exclusions - Fuzz Survivor Eligible)\n");
     printf("------------------------------------------------------------\n");
-    printf("GENUINE UNEXCLUSION BUGS DETECTED:  %llu\n", (unsigned long long)authentic_bugs);
+    printf("GENUINE DIVERGENCES DETECTED:       %llu\n", (unsigned long long)authentic_bugs);
     printf("============================================================\n\n");
 
     close_api(&orig_api);

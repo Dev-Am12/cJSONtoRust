@@ -1,44 +1,40 @@
-﻿============================================================
+============================================================
+Compiling Release Binaries for Differential Fuzzer (Linux)
+============================================================
+    Finished `release` profile [optimized] target(s) in 0.25s
+--> Commencing 65+ Second Continuous Differential Fuzz Run...
+============================================================
 rJSON Differential Fuzzer (Original C vs Librjson.so)
 Target Continuous Execution: >= 65.0 Seconds (Monotonic Clock)
 ============================================================
 
-------------------------------------------------------------
-[Filter Engagement Proof] Verifying exclusion filter against known formatting divergence:
-  Orig String: {"num":	5e-007,	"valid":	true}
-  Rust String: {"num":	5e-07,	"valid":	true}
-  is_known_numeric_divergence result: TRUE (ENGAGED) (Filter proved to exclude numeric format divergence)
-------------------------------------------------------------
-
 [Init] Successfully dynamic-loaded both Original C and Rust release libraries.
-[Init] PRNG Seeded with Monotonic Time: 0x000011975F20036F
+[Init] PRNG Seeded with Monotonic Time: 0x000025288AB62289
 [Init] Commencing 65+ second differential fuzz loop...
 
-[Fuzz Progress] T+5.0s / 65.0s | Iterations: 150969 | Rate: ~30193 evals/sec | Genuine Bugs: 0
-[Fuzz Progress] T+10.0s / 65.0s | Iterations: 311216 | Rate: ~31121 evals/sec | Genuine Bugs: 0
-[Fuzz Progress] T+15.0s / 65.0s | Iterations: 467364 | Rate: ~31157 evals/sec | Genuine Bugs: 0
-[Fuzz Progress] T+20.0s / 65.0s | Iterations: 622628 | Rate: ~31131 evals/sec | Genuine Bugs: 0
-[Fuzz Progress] T+25.0s / 65.0s | Iterations: 777672 | Rate: ~31106 evals/sec | Genuine Bugs: 0
-[Fuzz Progress] T+30.0s / 65.0s | Iterations: 932595 | Rate: ~31086 evals/sec | Genuine Bugs: 0
-[Fuzz Progress] T+35.0s / 65.0s | Iterations: 1084787 | Rate: ~30993 evals/sec | Genuine Bugs: 0
-[Fuzz Progress] T+40.0s / 65.0s | Iterations: 1240658 | Rate: ~31016 evals/sec | Genuine Bugs: 0
-[Fuzz Progress] T+45.0s / 65.0s | Iterations: 1396474 | Rate: ~31032 evals/sec | Genuine Bugs: 0
-[Fuzz Progress] T+50.0s / 65.0s | Iterations: 1552628 | Rate: ~31052 evals/sec | Genuine Bugs: 0
-[Fuzz Progress] T+55.0s / 65.0s | Iterations: 1707711 | Rate: ~31049 evals/sec | Genuine Bugs: 0
-[Fuzz Progress] T+60.0s / 65.0s | Iterations: 1862958 | Rate: ~31048 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+5.0s / 65.0s | Iterations: 145269 | Rate: ~29054 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+10.0s / 65.0s | Iterations: 292064 | Rate: ~29205 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+15.0s / 65.0s | Iterations: 439560 | Rate: ~29303 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+20.0s / 65.0s | Iterations: 588171 | Rate: ~29408 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+25.0s / 65.0s | Iterations: 748056 | Rate: ~29921 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+30.0s / 65.0s | Iterations: 903919 | Rate: ~30130 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+35.0s / 65.0s | Iterations: 1059753 | Rate: ~30278 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+40.0s / 65.0s | Iterations: 1213698 | Rate: ~30342 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+45.0s / 65.0s | Iterations: 1371598 | Rate: ~30479 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+50.0s / 65.0s | Iterations: 1527532 | Rate: ~30550 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+55.0s / 65.0s | Iterations: 1683359 | Rate: ~30606 evals/sec | Genuine Bugs: 0
+[Fuzz Progress] T+60.0s / 65.0s | Iterations: 1841483 | Rate: ~30691 evals/sec | Genuine Bugs: 0
 
 ============================================================
 DIFFERENTIAL FUZZING CONTINUOUS RUN SUMMARY (65+ SECONDS)
 ============================================================
 Total Execution Duration:           65.00 seconds
-Total Evaluated Iterations:         2019669 payloads (~31072/sec)
+Total Evaluated Iterations:         1991083 payloads (~30632/sec)
 ------------------------------------------------------------
-Successful Parse Agreements:        641764
-Malformed Rejection Agreements:     1377905
-Ignored Known Divergences:
-  - Numeric Formatting (Outside Q): 0
-  - Float Overflow (Parse Diff):    0
+Successful Parse Agreements:        633242
+Malformed Rejection Agreements:     1357841
+Exclusion Filters Active:           0 (Zero Exclusions - Fuzz Survivor Eligible)
 ------------------------------------------------------------
-GENUINE UNEXCLUSION BUGS DETECTED:  0
+GENUINE DIVERGENCES DETECTED:       0
 ============================================================
 
