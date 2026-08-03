@@ -1,11 +1,19 @@
 [
-  { "api": "orig_c", "file": "small.json", "size_bytes": 583, "iterations": 5000, "mean_us": 1.25, "median_us": 1.18, "min_us": 1.12, "max_us": 46.42, "std_dev_us": 0.81 },
-  { "api": "facade_rust", "file": "small.json", "size_bytes": 583, "iterations": 5000, "mean_us": 2.63, "median_us": 2.02, "min_us": 1.88, "max_us": 182.76, "std_dev_us": 3.18 },
-  { "api": "raw_rust", "file": "small.json", "size_bytes": 583, "iterations": 5000, "mean_us": 2.31, "median_us": 2.03, "min_us": 1.95, "max_us": 147.18, "std_dev_us": 3.44 },
-  { "api": "orig_c", "file": "medium.json", "size_bytes": 3464, "iterations": 5000, "mean_us": 7.87, "median_us": 7.00, "min_us": 6.76, "max_us": 212.69, "std_dev_us": 4.79 },
-  { "api": "facade_rust", "file": "medium.json", "size_bytes": 3464, "iterations": 5000, "mean_us": 11.49, "median_us": 10.32, "min_us": 9.85, "max_us": 682.46, "std_dev_us": 10.27 },
-  { "api": "raw_rust", "file": "medium.json", "size_bytes": 3464, "iterations": 5000, "mean_us": 11.72, "median_us": 10.91, "min_us": 10.44, "max_us": 152.42, "std_dev_us": 4.96 },
-  { "api": "orig_c", "file": "large.json", "size_bytes": 586893, "iterations": 200, "mean_us": 3113.16, "median_us": 2997.79, "min_us": 2836.78, "max_us": 4549.56, "std_dev_us": 325.99 },
-  { "api": "facade_rust", "file": "large.json", "size_bytes": 586893, "iterations": 200, "mean_us": 6005.96, "median_us": 5780.95, "min_us": 5230.33, "max_us": 10368.43, "std_dev_us": 705.33 },
-  { "api": "raw_rust", "file": "large.json", "size_bytes": 586893, "iterations": 200, "mean_us": 3973.93, "median_us": 3659.43, "min_us": 3261.55, "max_us": 8283.14, "std_dev_us": 850.30 }
+{"api": "orig_c", "file": "small.json", "size_bytes": 605, "iterations": 5000, "mean_us": 3.10, "median_us": 2.78, "min_us": 2.18, "max_us": 148.58, "std_dev_us": 3.81}
+,
+{"api": "facade_rust", "file": "small.json", "size_bytes": 605, "iterations": 5000, "mean_us": 8.11, "median_us": 6.39, "min_us": 2.07, "max_us": 275.90, "std_dev_us": 8.88}
+,
+{"api": "raw_rust", "file": "small.json", "size_bytes": 605, "iterations": 5000, "mean_us": 6.18, "median_us": 5.90, "min_us": 3.90, "max_us": 258.48, "std_dev_us": 5.24}
+,
+{"api": "orig_c", "file": "medium.json", "size_bytes": 3551, "iterations": 5000, "mean_us": 14.08, "median_us": 13.01, "min_us": 6.81, "max_us": 101.87, "std_dev_us": 7.00}
+,
+{"api": "facade_rust", "file": "medium.json", "size_bytes": 3551, "iterations": 5000, "mean_us": 18.79, "median_us": 11.93, "min_us": 10.54, "max_us": 269.33, "std_dev_us": 13.22}
+,
+{"api": "raw_rust", "file": "medium.json", "size_bytes": 3551, "iterations": 5000, "mean_us": 14.75, "median_us": 10.56, "min_us": 10.12, "max_us": 288.60, "std_dev_us": 10.31}
+,
+{"api": "orig_c", "file": "large.json", "size_bytes": 589892, "iterations": 200, "mean_us": 4294.34, "median_us": 4025.37, "min_us": 3101.28, "max_us": 11477.22, "std_dev_us": 1059.96}
+,
+{"api": "facade_rust", "file": "large.json", "size_bytes": 589892, "iterations": 200, "mean_us": 11066.27, "median_us": 9384.69, "min_us": 6359.74, "max_us": 31327.02, "std_dev_us": 4286.89}
+,
+{"api": "raw_rust", "file": "large.json", "size_bytes": 589892, "iterations": 200, "mean_us": 4970.17, "median_us": 4520.20, "min_us": 3410.33, "max_us": 10276.99, "std_dev_us": 1393.42}
 ]

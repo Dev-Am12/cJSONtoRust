@@ -150,13 +150,19 @@ Full detail is in [`DECISIONS.md`](./DECISIONS.md) (23 documented architectural 
 
 Full methodology in [`bench/methodology.md`](./bench/methodology.md); raw data in [`bench/results.json`](./bench/results.json). Measured inside the same Docker/Linux environment as the test suite, release optimizations on both sides, full lifecycle timing (allocation through teardown), distributions reported.
 
-| Payload | Original C | Raw Rust engine | Facade (`librjson.so`) |
-|---|---|---|---|
-| Small (583 B) | 1.18 us median | 2.03 us median | 2.02 us median |
-| Medium (3.5 KB) | 7.00 us median | 10.91 us median | 10.32 us median |
-| Large (586 KB) | 2.998 ms median | 3.659 ms median | 5.781 ms median |
+| Payload | Engine | Initial Baseline (Median) | Optimized Release (Median) | Speedup & Parity Ratio |
+|---|---|---|---|---|
+| **Small (605 B)** | Original C | 1.18 us | 0.95 us | ~19% faster |
+| | Raw Rust Engine | 2.03 us | 1.46 us | **~28% faster** (1.53x of C) |
+| | Facade (`librjson.so`) | 2.02 us | 1.55 us | **~23% faster** (1.63x of C) |
+| **Medium (3.5 KB)** | Original C | 7.00 us | 5.36 us | ~23% faster |
+| | Raw Rust Engine | 10.91 us | 7.92 us | **~27% faster** (1.47x of C) |
+| | Facade (`librjson.so`) | 10.32 us | 8.58 us | **~17% faster** (1.60x of C) |
+| **Large (590 KB)** | Original C | 2.998 ms | 2.202 ms | ~26% faster |
+| | Raw Rust Engine | 3.659 ms | 2.457 ms | **~33% faster** (**1.11x of C**) |
+| | Facade (`librjson.so`) | 5.781 ms | 4.650 ms | **~19% faster** (1.89x of C) |
 
-**Honestly: the port is slower than the original**, running roughly 1.2-1.5x on the raw engine, and up to ~1.9x through the facade on large payloads. This difference is the explicit architectural cost of materializing a real C-heap pointer tree from the safe internal arena on every C-ABI invocation (a real, quantified structural cost of our two-layer design, detailed in `DECISIONS.md` #20 and #23). We intentionally traded this localized translation overhead for an ironclad, zero-unsafe parser engine with automatic memory cleanup upon parse failure.
+**Honestly: the port is slower than the original**, running roughly 1.1-1.5x on the raw engine (narrowing to just **1.11x** on large files under our current optimized zero-dependency build), and up to ~1.9x through the facade on large payloads. This difference is the explicit architectural cost of materializing a real C-heap pointer tree from the safe internal arena on every C-ABI invocation (a real, quantified structural cost of our two-layer design, detailed in `DECISIONS.md` #20 and #23). We intentionally traded this localized translation overhead for an ironclad, zero-unsafe parser engine with automatic memory cleanup upon parse failure.
 
 ---
 
