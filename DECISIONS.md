@@ -25,7 +25,7 @@ Every non-trivial, non-mechanical divergence or architectural choice made during
 - [19. Self-contained Docker build: Unity and fixtures vendored into adapter/](#19-self-contained-docker-build-unity-and-fixtures-vendored-into-adapter)
 - [20. Dual A/B Benchmarking: Raw Rust Core vs. Facade-Wrapped C-Bridge vs. Original C](#20-dual-ab-benchmarking-raw-rust-core-vs-facade-wrapped-c-bridge-vs-original-c)
 - [21. Differential Fuzzing Established Parser Behavioral Parity with Upstream cJSON](#21-differential-fuzzing-established-parser-behavioral-parity-with-upstream-cjson)
-- [22. White-box test parity: assertion-level audit against the original test suite](#22-white-box-test-parity-assertion-level-audir-against-the-original-test-suite)
+- [22. White-box test parity: assertion-level audit against the original test suite](#22-white-box-test-parity-assertion-level-audit-against-the-original-test-suite)
 
 ---
 
