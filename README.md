@@ -20,6 +20,7 @@ This README is written for two audiences at once: judges evaluating this submiss
 - [Code quality and `unsafe`](#code-quality-and-unsafe)
 - [Repository layout](#repository-layout)
 - [Fuzzing, robustness, and scope boundaries](#fuzzing-robustness-and-scope-boundaries)
+- [Demo video](#demo-video)
 - [Team](#team)
 - [License](#license)
 
@@ -197,29 +198,35 @@ All `unsafe` code is confined to the FFI boundary only. The parsing, printing, a
 ## Repository layout
 
 ```
-rJSON/
-+-- src/
-|   +-- arena.rs          -- core tree engine (0 unsafe)
-|   +-- parser.rs          -- recursive-descent parser (0 unsafe)
-|   +-- facade.rs           -- C-ABI boundary (unsafe lives here)
-|   +-- bin/raw_timing.rs    -- benchmark timing driver
-+-- tests/
-|   +-- original/            -- the 18 core cJSON test files, byte-identical to kickoff
-|   +-- original-utils/      -- the 3 cJSON_Utils test files (out-of-scope utils suite)
-|   +-- adapter/             -- untouched copies + alternate common.h/cJSON.h, vendored
-|   |                            Unity framework + fixtures, for the 6 adapter-eligible files
-|   +-- *.rs                  -- new Rust tests, including white-box behavioral re-expression
-+-- fuzz/                    -- crate-level libFuzzer crash-fuzzing target
-+-- benches/, bin/raw_timing.rs -- benchmark harness
-+-- tests-kickoff.sha256, tests-kickoff-utils.sha256
-+-- rust-toolchain.toml
-bench/                        -- cross-language benchmark harness and POSIX differential fuzzer engine
-fuzz/                         -- root anatomy differential fuzzer proxy (harness.c and log.txt proof)
-DECISIONS.md                   -- every non-trivial decision, with rationale
-AI_GUARDRAILS.md                -- standing rules given to AI coding agents on this project
-reference-outputs.md             -- captured ground-truth C behavior used throughout porting
-Dockerfile, build.sh, build.ps1
-.port-mortem.toml
+.
+|-- rJSON/                     -- Rust crate and native test suite
+|   |-- src/
+|   |   |-- arena.rs            -- core tree engine (0 unsafe)
+|   |   |-- parser.rs           -- recursive-descent parser (0 unsafe)
+|   |   |-- facade.rs           -- C-ABI boundary (unsafe lives here)
+|   |   `-- bin/raw_timing.rs   -- benchmark timing driver
+|   |-- tests/
+|   |   |-- original/           -- 18 core cJSON test files, byte-identical to kickoff
+|   |   |-- original-utils/     -- 3 out-of-scope cJSON_Utils test files
+|   |   |-- adapter/            -- adapter fixtures and vendored Unity files
+|   |   |-- port/               -- white-box behavioral re-expression tests
+|   |   `-- *.rs                -- public API and regression tests
+|   |-- benches/                -- Rust benchmark harness
+|   |-- fuzz/                   -- crate-level libFuzzer target
+|   |-- tests-kickoff*.sha256   -- frozen-test integrity manifests
+|   |-- Cargo.toml
+|   `-- rust-toolchain.toml
+|-- bench/                      -- cross-language benchmarks and differential fuzzer engine
+|-- fuzz/                       -- root differential-fuzzer harness and recorded log
+|-- README.md                   -- project overview, usage, scope, and evidence summary
+|-- DECISIONS.md                -- non-trivial engineering decisions and rationale
+|-- STDLIB.md                   -- C standard-library to Rust mapping
+|-- DEPENDENCY_PROOF.md         -- dependency policy and verification evidence
+|-- SUBMISSION_EVIDENCE.md      -- reproducible pre-submission checklist
+|-- reference-outputs.md        -- captured ground-truth C behavior
+|-- LICENSE                     -- MIT license
+|-- Dockerfile, build.sh, build.ps1
+`-- .port-mortem.toml
 ```
 
 ---
@@ -234,10 +241,18 @@ To provide complete technical transparency for evaluating judges:
 
 ---
 
+## Demo video
+
+[Watch the project demo video](https://drive.google.com/file/d/1VzwG3Mn7H6y_N-8XjT-zLXHAd0M_D2de/view?usp=drive_link)
+
+---
+
 ## Team
 
+Team CodeBlitz
+
 - **[Maanas Chawan](https://github.com/MVC2408)** — parser core, behavioral compatibility, regression testing & parser validation
-- **[Ashutosh Mishra](https://github.com/Dev-Am12)** — data model, tree mutation, printer
+- **[Ashutosh Mishra](https://github.com/Dev-Am12)** — data model, tree mutation, printer, minification, behavioral parity tests
 - **[Shivam Kshirsagar](https://github.com/ShivammKshirsagar)** — C-ABI facade, build/adapter infrastructure, benchmarking, fuzzing
 
 ## License
